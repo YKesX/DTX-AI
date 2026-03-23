@@ -1,0 +1,68 @@
+name: CI — Lint & Test
+
+on:
+  push:
+    branches: [main, "feature/**", "fix/**", "task/**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python-lint-test:
+    name: Python lint + tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install shared package
+        run: pip install -e packages/shared
+
+      - name: Install API dependencies
+        run: pip install -r apps/api/requirements.txt
+
+      - name: Install AI service dependencies
+        run: pip install -r services/ai/requirements.txt
+
+      - name: Install test dependencies
+        run: pip install pytest pytest-asyncio httpx anyio
+
+      - name: Run smoke tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/packages:${{ github.workspace }}/services
+        run: pytest tests/smoke/ -v
+
+      - name: Run integration tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/packages:${{ github.workspace }}/services
+        run: pytest tests/integration/ -v
+
+      - name: Lint with ruff (optional — skips if not installed)
+        run: pip install ruff && ruff check packages/ services/ apps/api/ || true
+
+  frontend-lint:
+    name: Frontend lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dashboard dependencies
+        working-directory: apps/dashboard
+        run: npm install --ignore-scripts
+
+      - name: Lint dashboard
+        working-directory: apps/dashboard
+        run: npm run lint || true

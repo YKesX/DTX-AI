@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+.env
+
+# Node / Frontend
+node_modules/
+.next/
+dist/
+.cache/
+*.local
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+*.lcov
+
+# Isaac Sim
+*.usd
+*.usda
+*.usdz
+*.log
+isaac_sim_cache/
+
+# SQLite
+*.db
+*.sqlite3
+
+# Secrets / local env overrides
+.env
+.env.local
+.env.*.local
+
+# OS
+Thumbs.db
