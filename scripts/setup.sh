@@ -6,19 +6,19 @@ echo "=== DTX-AI Setup ==="
 
 # ---- Python virtual environment ----
 if [ ! -d ".venv" ]; then
-  echo "[1/4] Creating Python virtual environment (.venv)…"
+  echo "[1/5] Creating Python virtual environment (.venv)…"
   python3 -m venv .venv
 fi
 
 source .venv/bin/activate
 
-echo "[2/4] Installing shared package…"
+echo "[2/5] Installing shared package…"
 pip install -q -e packages/shared
 
-echo "[3/4] Installing API dependencies…"
+echo "[3/5] Installing API dependencies…"
 pip install -q -r apps/api/requirements.txt
 
-echo "[4/4] Installing AI service dependencies…"
+echo "[4/5] Installing AI service dependencies…"
 pip install -q -r services/ai/requirements.txt
 
 # ---- Node / frontend ----

@@ -27,9 +27,8 @@ async def run_pipeline(event: EventIn) -> tuple[AnomalyResult, ExplanationResult
         (AnomalyResult, ExplanationResult) tuple.
     """
     # Run CPU-bound detection in a thread pool to avoid blocking the event loop
-    loop = asyncio.get_event_loop()
-    anomaly: AnomalyResult = await loop.run_in_executor(None, detect, event)
-    explanation: ExplanationResult = await loop.run_in_executor(None, explain, event, anomaly)
+    anomaly: AnomalyResult = await asyncio.to_thread(detect, event)
+    explanation: ExplanationResult = await asyncio.to_thread(explain, event, anomaly)
     return anomaly, explanation
 
 

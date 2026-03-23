@@ -20,14 +20,14 @@ echo "[1/2] Starting FastAPI backend on :8000…"
 (
   cd "$REPO_ROOT/apps/api" && \
   PYTHONPATH="$REPO_ROOT/packages:$REPO_ROOT/services" \
-  uvicorn main:app --reload --port 8000 &
-)
+  uvicorn main:app --reload --port 8000
+) &
 API_PID=$!
 echo "      API PID: $API_PID"
 
 # ---- Dashboard ----
 echo "[2/2] Starting Vite dashboard on :5173…"
-(cd "$REPO_ROOT/apps/dashboard" && npm run dev &)
+(cd "$REPO_ROOT/apps/dashboard" && npm run dev) &
 DASH_PID=$!
 echo "      Dashboard PID: $DASH_PID"
 
