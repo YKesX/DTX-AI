@@ -13,8 +13,12 @@ import aiosqlite
 
 from api.config import settings
 
-# Strip the "sqlite:///" prefix to get the file path
-_DB_PATH = Path(settings.database_url.replace("sqlite:///", ""))
+# Strip the "sqlite:///" prefix to get the file path and normalize it
+_raw_db_path = settings.database_url.replace("sqlite:///", "", 1)
+_DB_PATH = Path(_raw_db_path)
+if not _DB_PATH.is_absolute():
+    # Resolve relative paths against this module's directory to avoid CWD sensitivity
+    _DB_PATH = (Path(__file__).resolve().parent / _DB_PATH).resolve()
 
 
 async def init_db() -> None:
