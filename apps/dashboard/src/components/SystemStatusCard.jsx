@@ -1,6 +1,6 @@
 /**
  * SystemStatusCard — shows whether the API backend is reachable
- * and how many WebSocket clients are connected.
+ * via the WebSocket connection (connected: true/false).
  */
 export default function SystemStatusCard({ connected }) {
   return (
