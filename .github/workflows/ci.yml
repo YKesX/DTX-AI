@@ -58,12 +58,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-          cache-dependency-path: apps/dashboard/package-lock.json
 
       - name: Install dashboard dependencies
         working-directory: apps/dashboard
-        run: npm ci --ignore-scripts || npm install --ignore-scripts
+        run: npm install --ignore-scripts
 
       - name: Lint dashboard
         working-directory: apps/dashboard
