@@ -56,11 +56,11 @@ cd DTX-AI
 # 2. Run the automated setup
 bash scripts/setup.sh
 
-# 3. Seed sample events
-python scripts/seed_events.py
-
-# 4. Start all local services (opens three terminals)
+# 3. Start all local services (opens three terminals)
 bash scripts/run_dev.sh
+
+# 4. (In a separate terminal, after the API is up) seed sample events
+python scripts/seed_events.py
 ```
 
 Dashboard → http://localhost:5173  
