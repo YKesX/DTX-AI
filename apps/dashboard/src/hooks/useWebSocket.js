@@ -21,7 +21,7 @@ export function useWebSocket(url = null) {
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        setEvents((prev) => [data, ...prev]);
+        setEvents((prev) => [data, ...prev.slice(0, 49)]);
       } catch {
         // ignore malformed frames
       }
