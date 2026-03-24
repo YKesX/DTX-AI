@@ -42,7 +42,7 @@ export default function ExplanationPanel({ event }) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Varlık</p>
-          <p className="text-white font-semibold text-base">{event.entity}</p>
+          <p className="text-white font-semibold text-base">{event.entity_id}</p>
         </div>
         <Badge severity={event.severity} />
       </div>
