@@ -22,7 +22,11 @@ function deriveStatus(events) {
     (e) => e.severity === 'high' || e.severity === 'critical'
   ).length;
 
-  const connectedSensors = new Set(events.map((e) => e.entity_id)).size;
+  const connectedSensors = new Set(
+    events
+      .map((e) => e.entity_id ?? e.entity)
+      .filter(Boolean)
+  ).size;
 
   const latest = events.reduce((a, b) =>
     new Date(a.timestamp) > new Date(b.timestamp) ? a : b
