@@ -1,43 +1,51 @@
 """
-DTX-AI — FastAPI application entry point.
+DTX-AI — FastAPI stub entry point.
 
 Start with:
     uvicorn main:app --reload --port 8000
+or:
+    python main.py
 """
 
-from contextlib import asynccontextmanager
+import os
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.config import settings
-from api.database import init_db
-from api.routes import events, alerts, health, websocket
+from routers.events import router as events_router
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Initialise resources on startup, clean up on shutdown."""
-    await init_db()
-    yield
-
+load_dotenv()
 
 app = FastAPI(
     title="DTX-AI API",
-    description="Smart Warehouse XAI Digital Twin — backend services",
+    description="Smart Warehouse XAI Digital Twin — stub backend",
     version="0.1.0",
-    lifespan=lifespan,
 )
 
+# Allow all origins in development; tighten this for production.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(health.router, tags=["health"])
-app.include_router(events.router, prefix="/events", tags=["events"])
-app.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
-app.include_router(websocket.router, tags=["websocket"])
+app.include_router(events_router, tags=["events"])
+
+
+@app.get("/health", tags=["health"])
+async def health() -> dict:
+    return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "main:app",
+        host=os.getenv("API_HOST", "0.0.0.0"),
+        port=int(os.getenv("API_PORT", "8000")),
+        reload=True,
+    )
