@@ -80,8 +80,16 @@ def split_and_scale(df):
 
     # Fit scaler only on train data — prevents data leakage into test set
     scaler = StandardScaler()
-    X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train), columns=FEATURES)
-    X_test_scaled  = pd.DataFrame(scaler.transform(X_test),      columns=FEATURES)
+    X_train_scaled = pd.DataFrame(
+        scaler.fit_transform(X_train),
+        columns=FEATURES,
+        index=X_train.index
+    )
+    X_test_scaled = pd.DataFrame(
+        scaler.transform(X_test),
+        columns=FEATURES,
+        index=X_test.index
+    )
 
     # Save scaler for inference
     joblib.dump(scaler, 'scaler.pkl')
