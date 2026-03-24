@@ -98,23 +98,32 @@ def preprocess_single(raw_input: dict, scaler_path='scaler.pkl', window_buffer: 
                           'Vibration (mm/s)', 'Temperature (°C)',
                           'Pressure (bar)', 'Timestamp'
         scaler_path:    path to saved scaler.pkl
-        window_buffer:  list of last N raw reading dicts (min 5 required)
-                        caller is responsible for maintaining this buffer
+        window_buffer:  list of last N raw reading dicts (min 5 required).
+                        This function mutates the buffer in place and will
+                        keep only the most recent 5 readings after each call.
 
     Returns:
         X_scaled: np.array ready for model.predict()
     """
 
-    if window_buffer is None or len(window_buffer) < 5:
-        raise ValueError("window_buffer must contain at least 5 previous readings")
+    window_size = 5
 
-    # Add current reading to buffer and build DataFrame
+    if window_buffer is None or len(window_buffer) < window_size:
+        raise ValueError(f"window_buffer must contain at least {window_size} previous readings")
+
+    # Add current reading to buffer
     window_buffer.append(raw_input)
+
+    # Prune buffer to keep only the last `window_size` readings
+    if len(window_buffer) > window_size:
+        window_buffer[:] = window_buffer[-window_size:]
+
+    # Build DataFrame from buffer
     df_buffer = pd.DataFrame(window_buffer)
     df_buffer['Timestamp'] = pd.to_datetime(df_buffer['Timestamp'])
 
     # Engineer rolling features on buffer
-    df_buffer = engineer_features(df_buffer, window=5)
+    df_buffer = engineer_features(df_buffer, window=window_size)
 
     # Take only the latest row (current reading)
     latest = df_buffer.iloc[[-1]]
