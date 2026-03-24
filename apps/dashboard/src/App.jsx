@@ -1,40 +1,47 @@
-import { useState } from 'react'
-import { useWebSocket } from './hooks/useWebSocket'
-import SystemStatusCard from './components/SystemStatusCard'
-import LiveAlertsPanel from './components/LiveAlertsPanel'
-import RecentEventList from './components/RecentEventList'
-import ExplanationPanel from './components/ExplanationPanel'
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { useWebSocket } from './hooks/useWebSocket';
+import Sidebar from './components/layout/Sidebar';
+import TopBar from './components/layout/TopBar';
+import Dashboard from './pages/Dashboard';
 
-export default function App() {
-  const { alerts, connected } = useWebSocket()
-  const [selectedAlert, setSelectedAlert] = useState(null)
+function Layout() {
+  const { status } = useWebSocket(null);
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* Header */}
-      <header className="bg-gray-900 text-white px-6 py-4 flex items-center justify-between">
-        <h1 className="text-lg font-bold tracking-tight">
-          DTX-AI — Smart Warehouse Digital Twin
-        </h1>
-        <SystemStatusCard connected={connected} />
-      </header>
-
-      {/* Main grid */}
-      <main className="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left column: live alerts + recent events */}
-        <div className="lg:col-span-2 space-y-6">
-          <LiveAlertsPanel
-            alerts={alerts}
-            onSelect={setSelectedAlert}
-          />
-          <RecentEventList alerts={alerts} />
-        </div>
-
-        {/* Right column: explanation */}
-        <div>
-          <ExplanationPanel alert={selectedAlert} />
-        </div>
-      </main>
+    <div className="dark min-h-screen bg-gray-900 text-white">
+      <Sidebar />
+      <div className="ml-56">
+        <TopBar title="Akıllı Depo Yönetim Paneli" wsStatus={status} />
+        <main className="pt-14 p-6 min-h-screen">
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route
+              path="/events"
+              element={
+                <div className="text-gray-400 py-20 text-center">
+                  Olaylar sayfası yakında…
+                </div>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <div className="text-gray-400 py-20 text-center">
+                  Ayarlar sayfası yakında…
+                </div>
+              }
+            />
+          </Routes>
+        </main>
+      </div>
     </div>
-  )
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Layout />
+    </BrowserRouter>
+  );
 }

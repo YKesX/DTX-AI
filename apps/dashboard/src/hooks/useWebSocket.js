@@ -1,56 +1,63 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { mockEvents } from '../lib/mockData';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws/events'
-
-/**
- * Maintains a WebSocket connection to the DTX-AI backend.
- * Reconnects automatically on disconnect.
- *
- * @returns {{ alerts: DashboardAlert[], connected: boolean }}
- */
-export function useWebSocket() {
-  const [alerts, setAlerts] = useState([])
-  const [connected, setConnected] = useState(false)
-  const wsRef = useRef(null)
-  const reconnectTimer = useRef(null)
+export function useWebSocket(url = null) {
+  const [events, setEvents] = useState([]);
+  const [status, setStatus] = useState('disconnected');
+  const wsRef = useRef(null);
+  const retryTimer = useRef(null);
+  // Stable ref so the reconnect closure always sees the latest url
+  const urlRef = useRef(url);
+  useEffect(() => { urlRef.current = url; }, [url]);
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return
+    if (!urlRef.current) return;
 
-    const ws = new WebSocket(WS_URL)
-    wsRef.current = ws
+    const ws = new WebSocket(urlRef.current);
+    wsRef.current = ws;
 
-    ws.onopen = () => {
-      setConnected(true)
-      clearTimeout(reconnectTimer.current)
-    }
+    ws.onopen = () => setStatus('connected');
 
-    ws.onmessage = (event) => {
+    ws.onmessage = (e) => {
       try {
-        const alert = JSON.parse(event.data)
-        setAlerts((prev) => [alert, ...prev].slice(0, 100)) // keep last 100
+        const data = JSON.parse(e.data);
+        setEvents((prev) => [data, ...prev]);
       } catch {
-        // ignore malformed messages
+        // ignore malformed frames
       }
-    }
+    };
 
-    ws.onclose = () => {
-      setConnected(false)
-      reconnectTimer.current = setTimeout(connect, 3000)
-    }
+    const scheduleRetry = () => {
+      setStatus('disconnected');
+      retryTimer.current = setTimeout(connect, 3000);
+    };
 
+    ws.onclose = scheduleRetry;
     ws.onerror = () => {
-      ws.close()
-    }
-  }, [])
+      ws.close(); // triggers onclose → scheduleRetry
+    };
+  }, []); // no deps — uses urlRef internally
 
   useEffect(() => {
-    connect()
-    return () => {
-      clearTimeout(reconnectTimer.current)
-      wsRef.current?.close()
+    if (!url) {
+      // Mock mode
+      setEvents(mockEvents);
+      setStatus('connected');
+      return;
     }
-  }, [connect])
 
-  return { alerts, connected }
+    connect();
+
+    return () => {
+      clearTimeout(retryTimer.current);
+      // Prevent the onclose handler from scheduling another retry on unmount
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.onerror = null;
+        wsRef.current.close();
+      }
+    };
+  }, [url, connect]);
+
+  return { events, setEvents, status };
 }
