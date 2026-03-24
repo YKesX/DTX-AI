@@ -64,7 +64,7 @@ export default function EventTable({ events = [], onSelectEvent, selectedId }) {
                   }`}
                 >
                   <td className="px-5 py-3 text-gray-400 font-mono text-xs">{time}</td>
-                  <td className="px-5 py-3 text-white font-medium">{evt.entity}</td>
+                  <td className="px-5 py-3 text-white font-medium">{evt.entity ?? evt.entity_id}</td>
                   <td className="px-5 py-3 text-gray-300">{evt.anomaly_type}</td>
                   <td className="px-5 py-3">
                     <ScoreBar score={evt.anomaly_score} />
