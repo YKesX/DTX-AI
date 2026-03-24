@@ -14,8 +14,13 @@ import numpy as np
 import kagglehub
 import joblib
 import os
+import threading
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+
+
+_scaler_cache: dict = {}
+_scaler_cache_lock = threading.Lock()
 
 
 FEATURES = [
@@ -129,8 +134,12 @@ def preprocess_single(raw_input: dict, scaler_path='scaler.pkl', window_buffer: 
     latest = df_buffer.iloc[[-1]]
     X = latest[FEATURES]
 
-    # Load scaler and transform
-    scaler = joblib.load(scaler_path)
+    # Load scaler (cached by path to avoid repeated filesystem IO)
+    if scaler_path not in _scaler_cache:
+        with _scaler_cache_lock:
+            if scaler_path not in _scaler_cache:
+                _scaler_cache[scaler_path] = joblib.load(scaler_path)
+    scaler = _scaler_cache[scaler_path]
     X_scaled = scaler.transform(X)
 
     return X_scaled
