@@ -89,14 +89,14 @@ API enriches output metadata with:
 ## 7) Artifact locations
 
 - Registry/shared:
-  - [services/ai/ai/models/shared/model_registry.json](services/ai/ai/models/shared/model_registry.json)
-  - [services/ai/ai/models/shared/feature_order.json](services/ai/ai/models/shared/feature_order.json)
-  - [services/ai/ai/models/shared/scaler.pkl](services/ai/ai/models/shared/scaler.pkl)
+  - [services/ai/ai/models/shared/model_registry.json](../services/ai/ai/models/shared/model_registry.json)
+  - [services/ai/ai/models/shared/feature_order.json](../services/ai/ai/models/shared/feature_order.json)
+  - [services/ai/ai/models/shared/scaler.pkl](../services/ai/ai/models/shared/scaler.pkl)
 - Model families:
-  - [services/ai/ai/models/lightgbm](services/ai/ai/models/lightgbm)
-  - [services/ai/ai/models/random_forest](services/ai/ai/models/random_forest)
-  - [services/ai/ai/models/xgboost](services/ai/ai/models/xgboost)
-  - [services/ai/ai/models/lstm_ae](services/ai/ai/models/lstm_ae)
+  - [services/ai/ai/models/lightgbm](../services/ai/ai/models/lightgbm)
+  - [services/ai/ai/models/random_forest](../services/ai/ai/models/random_forest)
+  - [services/ai/ai/models/xgboost](../services/ai/ai/models/xgboost)
+  - [services/ai/ai/models/lstm_ae](../services/ai/ai/models/lstm_ae)
 
 ## 8) Interpreting dashboard replay results
 
