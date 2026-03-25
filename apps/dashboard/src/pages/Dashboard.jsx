@@ -79,8 +79,14 @@ export default function Dashboard() {
         if (rows.length === 0) return;
         const normalized = normalizeAlerts(rows);
         setEvents((prev) => {
-          const existingIds = new Set(prev.map((e) => e.id));
-          const fresh = normalized.filter((e) => !existingIds.has(e.id));
+          // Use a stable identifier (prefer event_id, fall back to id) to avoid
+          // duplicates when the same event is received from both REST and WS.
+          const existingKeys = new Set(
+            prev.map((e) => (e.event_id != null ? e.event_id : e.id))
+          );
+          const fresh = normalized.filter(
+            (e) => !existingKeys.has(e.event_id != null ? e.event_id : e.id)
+          );
           return [...prev, ...fresh];
         });
       })
