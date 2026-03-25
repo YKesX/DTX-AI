@@ -36,13 +36,15 @@ export default function ExplanationPanel({ event }) {
     );
   }
 
+  const topFeatures = Array.isArray(event.top_features) ? event.top_features : [];
+
   return (
     <Card className="flex flex-col gap-5 p-5">
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Varlık</p>
-          <p className="text-white font-semibold text-base">{event.entity_id}</p>
+          <p className="text-white font-semibold text-base">{event.entity_id || event.entity}</p>
         </div>
         <Badge severity={event.severity} />
       </div>
@@ -61,27 +63,31 @@ export default function ExplanationPanel({ event }) {
               : 'text-green-400'
           }`}
         >
-          {event.anomaly_score.toFixed(2)}
+          {(event.anomaly_score ?? 0).toFixed(2)}
         </span>
       </div>
 
       {/* Top features */}
-      <div>
-        <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">
-          Önemli Özellikler
-        </p>
-        <div className="space-y-3">
-          {event.top_features.map((f) => (
-            <FeatureBar key={f.name} feature={f} />
-          ))}
+      {topFeatures.length > 0 && (
+        <div>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">
+            Önemli Özellikler
+          </p>
+          <div className="space-y-3">
+            {topFeatures.map((f) => (
+              <FeatureBar key={f.name} feature={f} />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Explanation */}
       <div>
         <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Açıklama</p>
         <div className="bg-gray-700/20 border border-gray-700 rounded-lg p-3">
-          <p className="text-sm text-gray-300 leading-relaxed">{event.explanation}</p>
+          <p className="text-sm text-gray-300 leading-relaxed">
+            {event.explanation || event.summary || '—'}
+          </p>
         </div>
       </div>
     </Card>
