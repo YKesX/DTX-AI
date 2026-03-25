@@ -132,6 +132,73 @@ _SCENARIOS: dict[str, list[dict[str, Any]]] = {
             "metadata": {"fault_type": "combined"},
         },
     ],
+    "gradual_drift": [
+        {
+            "asset_id": "conveyor-belt-01",
+            "zone_id": "zone-A",
+            "vibration": 5.0,
+            "temperature": 45.0,
+            "humidity": 50.0,
+            "pressure": 1011.0,
+            "metadata": {"fault_type": "gradual_drift", "step": 1},
+        },
+        {
+            "asset_id": "conveyor-belt-01",
+            "zone_id": "zone-A",
+            "vibration": 8.0,
+            "temperature": 55.0,
+            "humidity": 50.0,
+            "pressure": 1012.0,
+            "metadata": {"fault_type": "gradual_drift", "step": 2},
+        },
+        {
+            "asset_id": "conveyor-belt-01",
+            "zone_id": "zone-A",
+            "vibration": 11.5,
+            "temperature": 68.0,
+            "humidity": 50.0,
+            "pressure": 1014.0,
+            "metadata": {"fault_type": "gradual_drift", "step": 3},
+        },
+        {
+            "asset_id": "conveyor-belt-01",
+            "zone_id": "zone-A",
+            "vibration": 15.0,
+            "temperature": 79.0,
+            "humidity": 50.0,
+            "pressure": 1015.0,
+            "metadata": {"fault_type": "gradual_drift", "step": 4},
+        },
+    ],
+    "intermittent_spike": [
+        {
+            "asset_id": "forklift-03",
+            "zone_id": "zone-C",
+            "vibration": 2.2,
+            "temperature": 34.0,
+            "humidity": 46.0,
+            "pressure": 1012.0,
+            "metadata": {"fault_type": "intermittent_spike", "state": "baseline"},
+        },
+        {
+            "asset_id": "forklift-03",
+            "zone_id": "zone-C",
+            "vibration": 20.0,
+            "temperature": 92.0,
+            "humidity": 42.0,
+            "pressure": 1058.0,
+            "metadata": {"fault_type": "intermittent_spike", "state": "spike"},
+        },
+        {
+            "asset_id": "forklift-03",
+            "zone_id": "zone-C",
+            "vibration": 2.5,
+            "temperature": 35.0,
+            "humidity": 45.0,
+            "pressure": 1011.0,
+            "metadata": {"fault_type": "intermittent_spike", "state": "recover"},
+        },
+    ],
     "mixed": [],  # built dynamically below
 }
 
@@ -141,6 +208,8 @@ _SCENARIOS["mixed"] = (
     + _SCENARIOS["bearing_fault"][:1]
     + _SCENARIOS["overheating"][:1]
     + _SCENARIOS["combined"][:1]
+    + _SCENARIOS["gradual_drift"][:1]
+    + _SCENARIOS["intermittent_spike"][:1]
     + _SCENARIOS["normal"][1:2]
 )
 
@@ -213,7 +282,16 @@ def main() -> None:
         action="store_true",
         help="Send exact values without random noise",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Random seed for reproducible jittered events",
+    )
     args = parser.parse_args()
+
+    if args.seed is not None:
+        random.seed(args.seed)
 
     scenario_pool = _SCENARIOS[args.scenario]
     if not scenario_pool:
