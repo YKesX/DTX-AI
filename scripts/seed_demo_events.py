@@ -236,10 +236,13 @@ def main() -> None:
             print(f"  [{i:>3}/{args.count}] {payload['asset_id']:<22} → {_pretty_result(result)}")
             ok += 1
         except urllib.error.URLError as exc:
-            print(f"  [{i:>3}/{args.count}] FAILED ({payload['asset_id']}): {exc}")
+            print(f"  [{i:>3}/{args.count}] FAILED ({payload.get('asset_id', '?')}): {exc}")
             failed += 1
         except (json.JSONDecodeError, KeyError, ValueError) as exc:
-            print(f"  [{i:>3}/{args.count}] ERROR  ({payload['asset_id']}): {type(exc).__name__}: {exc}")
+            print(
+                f"  [{i:>3}/{args.count}] ERROR  ({payload.get('asset_id', '?')}): "
+                f"{type(exc).__name__}: {exc}"
+            )
             failed += 1
 
         if args.delay > 0 and i < args.count:
