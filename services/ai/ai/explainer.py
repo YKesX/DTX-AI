@@ -80,9 +80,8 @@ def explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
     runtime = load_runtime_model()
     if runtime.available and runtime.supports_tree_xai and runtime.model is not None:
         try:
-            # xai_explainer.py lives under services/ai/, which is on PYTHONPATH
-            # in dev/test startup scripts and CI runs.
-            from xai_explainer import FEATURES, generate_xai_report
+            # services/ is on PYTHONPATH in dev/test/CI, so import via ai namespace.
+            from ai.xai_explainer import FEATURES, generate_xai_report
 
             sensor_values = {
                 "Vibration (mm/s)": float(event.vibration or 0.0),

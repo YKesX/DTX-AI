@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections import deque
+from collections import OrderedDict, deque
 
 from shared.schemas import AnomalyResult, AnomalyType, EventIn, Severity
 
@@ -18,8 +18,9 @@ _THRESHOLDS = {
 }
 
 _ANOMALY_THRESHOLD = float(os.getenv("ANOMALY_THRESHOLD", "0.5"))
-_WINDOW_BUFFER: dict[str, deque] = {}
+_WINDOW_BUFFER: OrderedDict[str, deque] = OrderedDict()
 _WINDOW_SIZE = 5
+_MAX_WINDOW_KEYS = int(os.getenv("WINDOW_BUFFER_MAX_KEYS", "500"))
 DEFAULT_FEATURE_COUNT = 9
 
 _CLASS_MAP = {
@@ -42,13 +43,21 @@ def _event_to_raw_features(event: EventIn) -> dict[str, float]:
     }
 
 
+def _touch_window_buffer(key: str) -> deque:
+    if key in _WINDOW_BUFFER:
+        _WINDOW_BUFFER.move_to_end(key)
+        return _WINDOW_BUFFER[key]
+
+    if len(_WINDOW_BUFFER) >= _MAX_WINDOW_KEYS:
+        _WINDOW_BUFFER.popitem(last=False)
+    _WINDOW_BUFFER[key] = deque(maxlen=_WINDOW_SIZE)
+    return _WINDOW_BUFFER[key]
+
+
 def _build_window_features(event: EventIn, feature_order: list[str]) -> list[float]:
     key = f"{event.asset_id}:{event.zone_id}"
-    if key not in _WINDOW_BUFFER:
-        _WINDOW_BUFFER[key] = deque(maxlen=_WINDOW_SIZE)
-
     raw = _event_to_raw_features(event)
-    history = _WINDOW_BUFFER[key]
+    history = _touch_window_buffer(key)
     history.append(raw)
     rows = list(history)
 
@@ -99,7 +108,10 @@ def _run_tree_model(event: EventIn, runtime: RuntimeModel) -> AnomalyResult:
         anomaly_score = float(pred_class != 0)
 
     anomaly_type, severity = _CLASS_MAP.get(pred_class, (AnomalyType.COMBINED, Severity.WARNING))
-    is_anomaly = pred_class != 0 and anomaly_score >= 0.3
+    threshold = runtime.metadata.get("default_threshold")
+    if threshold is None:
+        threshold = _ANOMALY_THRESHOLD
+    is_anomaly = pred_class != 0 and anomaly_score >= float(threshold)
     if not is_anomaly:
         anomaly_type, severity = AnomalyType.UNKNOWN, Severity.INFO
 

@@ -39,7 +39,7 @@ def _read_json(path: Path) -> dict[str, Any] | list[Any]:
 
 def _resolve_path(raw_path: str | None) -> Path:
     if not raw_path:
-        return Path("")
+        return REPO_ROOT / ".nonexistent_model_path"
 
     path = Path(raw_path)
     if path.is_absolute():
@@ -137,14 +137,17 @@ def load_runtime_model(requested_model: str | None = None) -> RuntimeModel:
     models in the registry order. When no enabled model is loadable, it returns
     an unavailable RuntimeModel instead of raising, allowing detector fallback.
     """
-    cache_key = requested_model or "__registry_active__"
+    registry = load_registry()
+    models_cfg: dict[str, Any] = registry.get("models", {})
+    selected = requested_model or os.getenv("DTX_ACTIVE_MODEL") or registry.get("active_model")
+    if requested_model is not None:
+        cache_key = requested_model
+    else:
+        cache_key = f"__selected__:{selected or 'none'}"
     if cache_key in _CACHE:
         return _CACHE[cache_key]
 
-    registry = load_registry()
-    models_cfg: dict[str, Any] = registry.get("models", {})
     scaler, feature_order = _load_shared_files(registry)
-    selected = requested_model or os.getenv("DTX_ACTIVE_MODEL") or registry.get("active_model")
 
     # Selection precedence: requested arg > env override > registry active_model.
     order = [selected] + [k for k in models_cfg.keys() if k != selected]
