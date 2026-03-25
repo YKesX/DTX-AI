@@ -39,7 +39,7 @@ def _read_json(path: Path) -> dict[str, Any] | list[Any]:
 
 def _resolve_path(raw_path: str | None) -> Path:
     if not raw_path:
-        return REPO_ROOT / ".nonexistent_model_path"
+        return REPO_ROOT / ".sentinel_missing_model"
 
     path = Path(raw_path)
     if path.is_absolute():

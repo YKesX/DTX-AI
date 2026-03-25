@@ -20,7 +20,7 @@ _THRESHOLDS = {
 _ANOMALY_THRESHOLD = float(os.getenv("ANOMALY_THRESHOLD", "0.5"))
 _WINDOW_BUFFER: OrderedDict[str, deque] = OrderedDict()
 _WINDOW_SIZE = 5
-_MAX_WINDOW_KEYS = int(os.getenv("WINDOW_BUFFER_MAX_KEYS", "500"))
+_WINDOW_BUFFER_MAX_KEYS = int(os.getenv("WINDOW_BUFFER_MAX_KEYS", "500"))
 DEFAULT_FEATURE_COUNT = 9
 
 _CLASS_MAP = {
@@ -48,7 +48,7 @@ def _touch_window_buffer(key: str) -> deque:
         _WINDOW_BUFFER.move_to_end(key)
         return _WINDOW_BUFFER[key]
 
-    if len(_WINDOW_BUFFER) >= _MAX_WINDOW_KEYS:
+    if len(_WINDOW_BUFFER) >= _WINDOW_BUFFER_MAX_KEYS:
         _WINDOW_BUFFER.popitem(last=False)
     _WINDOW_BUFFER[key] = deque(maxlen=_WINDOW_SIZE)
     return _WINDOW_BUFFER[key]
@@ -108,10 +108,12 @@ def _run_tree_model(event: EventIn, runtime: RuntimeModel) -> AnomalyResult:
         anomaly_score = float(pred_class != 0)
 
     anomaly_type, severity = _CLASS_MAP.get(pred_class, (AnomalyType.COMBINED, Severity.WARNING))
-    threshold = runtime.metadata.get("default_threshold")
-    if threshold is None:
-        threshold = _ANOMALY_THRESHOLD
-    is_anomaly = pred_class != 0 and anomaly_score >= float(threshold)
+    threshold = runtime.metadata.get("default_threshold", _ANOMALY_THRESHOLD)
+    try:
+        threshold_value = float(threshold)
+    except (TypeError, ValueError):
+        threshold_value = _ANOMALY_THRESHOLD
+    is_anomaly = pred_class != 0 and anomaly_score >= threshold_value
     if not is_anomaly:
         anomaly_type, severity = AnomalyType.UNKNOWN, Severity.INFO
 
