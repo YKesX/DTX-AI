@@ -16,12 +16,6 @@ DO_SETUP=0
 DO_SEED=1
 STRICT_REPLAY=0
 
-pkill -f "uvicorn main:app" || true
-pkill -f "npm run dev" || true
-lsof -ti :8000 | xargs kill -9 2>/dev/null || true
-lsof -ti :5173 | xargs kill -9 2>/dev/null || true
-lsof -ti :5174 | xargs kill -9 2>/dev/null || true
-
 usage() {
   cat <<'EOF'
 Usage: bash scripts/run_demo.sh [options]
