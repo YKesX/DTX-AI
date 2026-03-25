@@ -117,11 +117,17 @@ as they are produced by `POST /events/`.
 ## Dashboard payload normalisation
 
 The frontend (`src/lib/normalizeAlert.js`) converts every backend payload
-into a flat **view-model** before passing it to React components:
+into a flat **view-model** before passing it to React components.
+
+`id` is always set to `event_id` — the stable identifier shared by both
+the WebSocket `DashboardAlert` and the REST `EventLog` row — so that
+deduplication and row selection work correctly across sources.
+`alert_id` is kept as a separate optional field.
 
 | View-model field | Source (DashboardAlert) | Source (EventLog row) |
 |---|---|---|
-| `id` | `alert_id` | `event_id` |
+| `id` *(stable, always `event_id`)* | `event.event_id` | `event_id` |
+| `alert_id` | `alert_id` | `null` |
 | `event_id` | `event.event_id` | `event_id` |
 | `timestamp` | `event.timestamp` | `timestamp` |
 | `entity_id` | `event.asset_id` | `asset_id` |
