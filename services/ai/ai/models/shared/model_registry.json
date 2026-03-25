@@ -1,0 +1,41 @@
+{
+  "active_model": "lightgbm",
+  "shared": {
+    "scaler_path": "services/ai/models/shared/scaler.pkl",
+    "feature_order_path": "services/ai/models/shared/feature_order.json"
+  },
+  "models": {
+    "lightgbm": {
+      "enabled": true,
+      "family": "lightgbm",
+      "path": "services/ai/models/lightgbm/best_lgbm.pkl",
+      "metadata_path": "services/ai/models/lightgbm/metadata.json",
+      "requires_scaler": true,
+      "supports_tree_xai": true
+    },
+    "lstm_ae": {
+      "enabled": true,
+      "family": "lstm_autoencoder_pytorch",
+      "path": "services/ai/models/lstm_ae/best_lstmae.pth",
+      "metadata_path": "services/ai/models/lstm_ae/metadata.json",
+      "requires_scaler": true,
+      "supports_tree_xai": false
+    },
+    "random_forest": {
+      "enabled": true,
+      "family": "random_forest",
+      "path": "services/ai/models/random_forest/best_rf.pkl",
+      "metadata_path": "services/ai/models/random_forest/metadata.json",
+      "requires_scaler": true,
+      "supports_tree_xai": true
+    },
+    "xgboost": {
+      "enabled": true,
+      "family": "xgboost",
+      "path": "services/ai/models/xgboost/best_xgb.pkl",
+      "metadata_path": "services/ai/models/xgboost/metadata.json",
+      "requires_scaler": true,
+      "supports_tree_xai": true
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "model_name": "best_rf.pkl",
+  "model_family": "random_forest",
+  "trained_on_dataset": "ziya07/industrial-iot-fault-detection-dataset",
+  "feature_count": 9,
+  "feature_order_ref": "services/ai/models/shared/feature_order.json",
+  "scaler_required": true,
+  "class_mapping": {
+    "0": "no_fault",
+    "1": "bearing_fault",
+    "2": "overheating"
+  },
+  "training_split": "60/10/30",
+  "best_params": {
+    "n_estimators": 200,
+    "max_depth": 3
+  },
+  "metrics": {
+    "accuracy": 0.45,
+    "f1": 0.374059,
+    "precision": 0.376439,
+    "auroc": 0.52594
+  },
+  "decision_type": "multiclass_classifier",
+  "default_threshold": null,
+  "notes": "Fallback tree model. Not preferred as the first runtime default."
+}

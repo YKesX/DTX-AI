@@ -1,0 +1,28 @@
+{
+  "model_name": "best_lgbm.pkl",
+  "model_family": "lightgbm",
+  "trained_on_dataset": "ziya07/industrial-iot-fault-detection-dataset",
+  "feature_count": 9,
+  "feature_order_ref": "services/ai/models/shared/feature_order.json",
+  "scaler_required": true,
+  "class_mapping": {
+    "0": "no_fault",
+    "1": "bearing_fault",
+    "2": "overheating"
+  },
+  "training_split": "80/10/10",
+  "best_params": {
+    "n_estimators": 200,
+    "max_depth": 3,
+    "learning_rate": 0.1
+  },
+  "metrics": {
+    "accuracy": 0.55,
+    "f1": 0.414484,
+    "precision": 0.436388,
+    "auroc": 0.503305
+  },
+  "decision_type": "multiclass_classifier",
+  "default_threshold": null,
+  "notes": "Best initial tree-based runtime candidate because it fits the current SHAP-style explainer path."
+}

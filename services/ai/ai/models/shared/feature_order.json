@@ -1,0 +1,11 @@
+[
+  "Vibration (mm/s)",
+  "Temperature (°C)",
+  "Pressure (bar)",
+  "vib_rolling_mean",
+  "vib_rolling_std",
+  "vib_rolling_max",
+  "temp_rolling_mean",
+  "temp_drift",
+  "pressure_rolling_mean"
+]

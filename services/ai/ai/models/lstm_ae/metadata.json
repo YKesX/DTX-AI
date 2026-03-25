@@ -1,0 +1,34 @@
+{
+  "model_name": "best_lstmae.pth",
+  "model_family": "lstm_autoencoder_pytorch",
+  "trained_on_dataset": "ziya07/industrial-iot-fault-detection-dataset",
+  "feature_count": 9,
+  "feature_order_ref": "services/ai/models/shared/feature_order.json",
+  "scaler_required": true,
+  "input_shape": {
+    "batch": "N",
+    "sequence_length": 1,
+    "feature_dim": 9
+  },
+  "class_mapping": {
+    "0": "normal",
+    "1": "anomaly"
+  },
+  "training_split": "70/10/20",
+  "best_params": {
+    "epochs": 50,
+    "hidden": 64,
+    "latent": 8,
+    "lr": 0.01
+  },
+  "metrics": {
+    "accuracy": 0.65,
+    "f1": 0.607227,
+    "precision": 0.625992,
+    "auroc": null
+  },
+  "decision_type": "reconstruction_error_threshold",
+  "threshold_method": "95th_percentile_of_normal_train_reconstruction_error",
+  "default_threshold": null,
+  "notes": "Best reported F1 among current saved artifacts, but runtime use is incomplete until the actual numeric threshold and model class loading code are confirmed."
+}
