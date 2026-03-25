@@ -19,7 +19,7 @@ activate_venv
 echo "[1/2] Starting FastAPI backend on :8000…"
 (
   cd "$REPO_ROOT/apps/api" && \
-  PYTHONPATH="$REPO_ROOT/packages:$REPO_ROOT/services" \
+  PYTHONPATH="$REPO_ROOT/packages:$REPO_ROOT/services:$REPO_ROOT/services/ai${PYTHONPATH:+:$PYTHONPATH}" \
   uvicorn main:app --reload --port 8000
 ) &
 API_PID=$!

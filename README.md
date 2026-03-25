@@ -109,11 +109,20 @@ bash scripts/setup.sh
 bash scripts/run_dev.sh
 ```
 
+Runtime dependency note:
+
+- `lightgbm` and `xgboost` are included in [services/ai/requirements.txt](services/ai/requirements.txt).
+- On macOS, these model runtimes require OpenMP (`libomp.dylib`) to load successfully in strict replay mode.
+
 URLs:
 
 - API docs: http://localhost:8000/docs
 - Dashboard: http://localhost:5173
 - Live replay metrics: http://localhost:8000/metrics/live
+
+Dashboard convenience:
+
+- The event table includes a **Clear Logs** button that clears dashboard rows, deletes persisted API event logs, and resets live replay metrics for fresh percentage tracking.
 
 ## Current limitations
 

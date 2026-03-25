@@ -66,6 +66,24 @@ export default function Dashboard() {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [liveMetrics, setLiveMetrics] = useState(null);
 
+  const handleClearLogs = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/alerts/clear`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch {
+      // keep UI usable even if API clear fails
+    } finally {
+      setEvents([]);
+      setSelectedEvent(null);
+      setLiveMetrics((prev) => ({
+        ...(prev ?? {}),
+        total_replayed: 0,
+        total_correct: 0,
+        running_accuracy: 0,
+      }));
+    }
+  };
+
   // On mount, seed the list with events already stored in the API.
   // GET /alerts/ returns { alerts: [...EventLog rows], count: N }
   useEffect(() => {
@@ -138,6 +156,7 @@ export default function Dashboard() {
             events={events}
             onSelectEvent={setSelectedEvent}
             selectedId={selectedEvent?.id}
+            onClearLogs={handleClearLogs}
           />
         </div>
         <div className="w-[40%]">

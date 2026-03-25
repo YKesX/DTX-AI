@@ -9,16 +9,28 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from socket import timeout as SocketTimeout
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT / "services" / "ai") not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT / "services" / "ai"))
+ai_path = str(REPO_ROOT / "services" / "ai")
+if ai_path not in sys.path:
+    sys.path.insert(0, ai_path)
+
+# Verify the preprocessing module exists before importing
+preprocessing_file = Path(ai_path) / "preprocessing.py"
+if not preprocessing_file.exists():
+    raise ImportError(f"preprocessing module not found at {preprocessing_file}")
 
 from preprocessing import engineer_features, load_data  # noqa: E402
+
+try:
+    from ai.model_loader import load_runtime_model
+except Exception:  # pragma: no cover - optional preflight dependency
+    load_runtime_model = None
 
 
 LABEL_MAP = {
@@ -144,20 +156,87 @@ def fetch_live_metrics(base_url: str) -> dict[str, Any]:
         return json.loads(resp.read())
 
 
+def wait_for_api(base_url: str, timeout_sec: float = 20.0) -> None:
+    deadline = time.time() + max(timeout_sec, 0.0)
+    health_url = f"{base_url}/health"
+    last_err = "unknown"
+
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(health_url, timeout=2) as resp:
+                if resp.status == 200:
+                    return
+                last_err = f"HTTP {resp.status}"
+        except (urllib.error.URLError, SocketTimeout) as exc:
+            last_err = f"{type(exc).__name__}: {exc}"
+        time.sleep(0.5)
+
+    raise RuntimeError(
+        f"API is not reachable at {health_url}. "
+        f"Start backend first (e.g. bash scripts/run_dev.sh). Last error: {last_err}"
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Replay dataset rows through the real DTX-AI API path.")
     parser.add_argument("--url", default="http://localhost:8000", help="API base URL")
-    parser.add_argument("--model", default="random_forest", help="Active model key to request")
+    parser.add_argument("--model", default="lightgbm", help="Active model key to request")
     parser.add_argument("--split", default="test", choices=["train", "test", "all"], help="Replay split")
     parser.add_argument("--limit", type=int, default=100, help="Maximum rows to replay")
     parser.add_argument("--delay", type=float, default=0.5, help="Delay between requests (seconds)")
     parser.add_argument("--source", default="ziya", help="Dataset source identifier")
     parser.add_argument("--strict", action="store_true", help="Enable strict real-model replay validation")
+    parser.add_argument(
+        "--wait-timeout",
+        type=float,
+        default=20.0,
+        help="Seconds to wait for API /health before replay starts",
+    )
     return parser.parse_args()
+
+
+def preflight_requested_model(model_key: str, strict: bool) -> None:
+    if load_runtime_model is None:
+        print(
+            "Warning: local model preflight unavailable; could not import ai.model_loader.",
+            file=sys.stderr,
+        )
+        return
+
+    runtime = load_runtime_model(requested_model=model_key, strict_selection=True)
+    if runtime.available:
+        print(f"Model preflight OK: requested={model_key} runtime={runtime.key}")
+        return
+
+    message = (
+        f"Requested model '{model_key}' is unavailable in current environment. "
+        f"Reason: {runtime.reason}"
+    )
+    if strict:
+        raise RuntimeError(message)
+
+    print(
+        f"Warning: {message}\n"
+        "Replay may fallback to another model (often random_forest). "
+        "Use --strict to fail fast.",
+        file=sys.stderr,
+    )
 
 
 def main() -> None:
     args = parse_args()
+
+    try:
+        preflight_requested_model(args.model, args.strict)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(3)
+
+    try:
+        wait_for_api(args.url, timeout_sec=args.wait_timeout)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(2)
 
     rows = prepare_replay_rows(source=args.source, split=args.split, limit=args.limit)
     if rows.empty:

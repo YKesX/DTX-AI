@@ -1,5 +1,8 @@
 """POST /events — accepts warehouse sensor events and runs the AI pipeline."""
 
+import sys
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, status
 
 from shared.schemas import (
@@ -56,10 +59,18 @@ async def ingest_event(event: EventIn):
     try:
         from ai.pipeline import run_pipeline
     except ImportError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"AI pipeline unavailable: {exc}",
-        ) from exc
+        # Fallback when API is started without scripts that set PYTHONPATH.
+        repo_root = Path(__file__).resolve().parents[4]
+        ai_runtime_path = str(repo_root / "services" / "ai")
+        if ai_runtime_path not in sys.path:
+            sys.path.insert(0, ai_runtime_path)
+        try:
+            from ai.pipeline import run_pipeline
+        except ImportError as inner_exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"AI pipeline unavailable: {inner_exc}",
+            ) from inner_exc
 
     anomaly, explanation = await run_pipeline(event)
 

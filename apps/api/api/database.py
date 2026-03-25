@@ -78,3 +78,14 @@ async def fetch_recent_events(limit: int = 50) -> list[dict]:
         ) as cursor:
             rows = await cursor.fetchall()
     return [dict(r) for r in rows]
+
+
+async def clear_events() -> int:
+    """Delete all persisted events and return deleted row count."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) AS count FROM events") as cursor:
+            row = await cursor.fetchone()
+            before_count = int(row[0] if row else 0)
+        await db.execute("DELETE FROM events")
+        await db.commit()
+    return before_count
