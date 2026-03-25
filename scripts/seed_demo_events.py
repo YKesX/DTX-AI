@@ -171,11 +171,13 @@ def post_event(url: str, payload: dict[str, Any]) -> dict[str, Any]:
 def _pretty_result(result: dict[str, Any]) -> str:
     anomaly = result.get("anomaly", {})
     explanation = result.get("explanation", {})
+    score = anomaly.get("anomaly_score", 0)
+    score_str = f"{score:.3f}" if isinstance(score, (int, float)) else str(score)
     return (
-        f"score={anomaly.get('anomaly_score', '?'):.3f}  "
+        f"score={score_str}  "
         f"severity={anomaly.get('severity', '?'):<8}  "
         f"type={anomaly.get('anomaly_type', '?'):<12}  "
-        f"summary={explanation.get('summary', '')[:60]}"
+        f"summary={str(explanation.get('summary', ''))[:60]}"
     )
 
 
@@ -236,8 +238,8 @@ def main() -> None:
         except urllib.error.URLError as exc:
             print(f"  [{i:>3}/{args.count}] FAILED ({payload['asset_id']}): {exc}")
             failed += 1
-        except Exception as exc:  # noqa: BLE001
-            print(f"  [{i:>3}/{args.count}] ERROR  ({payload['asset_id']}): {exc}")
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            print(f"  [{i:>3}/{args.count}] ERROR  ({payload['asset_id']}): {type(exc).__name__}: {exc}")
             failed += 1
 
         if args.delay > 0 and i < args.count:

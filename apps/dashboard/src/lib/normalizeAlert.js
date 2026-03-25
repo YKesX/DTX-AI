@@ -70,7 +70,7 @@ export function normalizeAlert(raw) {
 
     const entityId = event.asset_id ?? '';
     return {
-      id: raw.alert_id ?? event.event_id ?? raw.created_at,
+      id: raw.alert_id ?? event.event_id ?? crypto.randomUUID(),
       alert_id: raw.alert_id ?? null,
       event_id: String(event.event_id ?? ''),
       timestamp: event.timestamp ?? raw.created_at ?? new Date().toISOString(),
@@ -97,7 +97,7 @@ export function normalizeAlert(raw) {
     raw.asset_id ?? raw.entity_id ?? raw.entity ?? '';
 
   return {
-    id: raw.event_id ?? raw.alert_id ?? raw.id ?? String(Date.now()),
+    id: raw.event_id ?? raw.alert_id ?? raw.id ?? crypto.randomUUID(),
     alert_id: raw.alert_id ?? null,
     event_id: String(raw.event_id ?? raw.id ?? ''),
     timestamp: raw.timestamp ?? new Date().toISOString(),

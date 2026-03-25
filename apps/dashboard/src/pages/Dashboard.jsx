@@ -25,8 +25,7 @@ function deriveStatus(events) {
 
   // Backend severities: info | warning | critical
   const activeAlerts = events.filter(
-    (e) => e.severity === 'warning' || e.severity === 'critical' ||
-           e.severity === 'high'    // backwards-compat with mock data
+    (e) => ['warning', 'critical', 'high'].includes(e.severity)
   ).length;
 
   const connectedSensors = new Set(
