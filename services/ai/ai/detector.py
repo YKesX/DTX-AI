@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from collections import OrderedDict, deque
 
+import pandas as pd
+
 from shared.schemas import AnomalyResult, AnomalyType, EventIn, Severity
 
 from ai.model_loader import RuntimeModel, load_runtime_model
@@ -90,14 +92,31 @@ def _build_window_features(event: EventIn, feature_order: list[str]) -> list[flo
     ][: len(feature_order) or DEFAULT_FEATURE_COUNT]
 
 
+def _feature_columns(runtime: RuntimeModel, feature_count: int) -> list[str]:
+    if runtime.feature_order:
+        return runtime.feature_order[:feature_count]
+
+    scaler_names = getattr(runtime.scaler, "feature_names_in_", None)
+    if scaler_names is not None:
+        return [str(name) for name in list(scaler_names)[:feature_count]]
+
+    return [f"f{i}" for i in range(feature_count)]
+
+
+def _build_model_input_df(features: list[float], runtime: RuntimeModel) -> pd.DataFrame:
+    columns = _feature_columns(runtime, len(features))
+    return pd.DataFrame([features], columns=columns)
+
+
 def _run_tree_model(event: EventIn, runtime: RuntimeModel) -> AnomalyResult:
     if runtime.model is None:
         return _rule_based_detect(event)
 
     features = _build_window_features(event, runtime.feature_order)
-    x = [features]
+    x = _build_model_input_df(features, runtime)
     if runtime.scaler is not None:
         x = runtime.scaler.transform(x)
+        x = pd.DataFrame(x, columns=_feature_columns(runtime, x.shape[1]))
 
     model = runtime.model
     pred_class = int(model.predict(x)[0])
@@ -164,10 +183,10 @@ def _run_lstm_autoencoder(event: EventIn, runtime: RuntimeModel) -> AnomalyResul
         return _rule_based_detect(event)
 
     features = _build_window_features(event, runtime.feature_order)
-    x = [features]
+    x = _build_model_input_df(features, runtime)
     if runtime.scaler is not None:
         x = runtime.scaler.transform(x)
-    tensor = torch.tensor(x, dtype=torch.float32).unsqueeze(1)
+    tensor = torch.tensor(x.values, dtype=torch.float32).unsqueeze(1)
 
     model = runtime.model
     if model is None:

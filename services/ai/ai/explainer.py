@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 
+import pandas as pd
+
 from shared.schemas import AnomalyResult, ExplanationResult, EventIn
 from ai.model_loader import load_runtime_model
 
@@ -111,7 +113,9 @@ def explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
             }
             ordered = [feature_values.get(f, 0.0) for f in runtime.feature_order or FEATURES]
             if runtime.scaler is not None:
-                transformed = runtime.scaler.transform([ordered])[0]
+                feature_names = runtime.feature_order or FEATURES
+                input_df = pd.DataFrame([ordered], columns=feature_names)
+                transformed = runtime.scaler.transform(input_df)[0]
             else:
                 transformed = ordered
             input_features = {
