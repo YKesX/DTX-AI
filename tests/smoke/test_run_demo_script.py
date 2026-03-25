@@ -13,5 +13,7 @@ def test_run_demo_help_contains_required_flags():
     )
     out = completed.stdout
     assert "--scenario" in out
+    assert "--mode" in out
     assert "--model" in out
+    assert "--strict-replay" in out
     assert "--no-seed" in out

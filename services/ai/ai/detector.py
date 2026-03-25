@@ -250,21 +250,58 @@ def detect(event: EventIn) -> AnomalyResult:
     if all(value is None for value in (event.vibration, event.temperature, event.pressure)):
         return _rule_based_detect(event)
 
+    metadata = event.metadata if isinstance(event.metadata, dict) else {}
+    requested_model = metadata.get("active_model") or os.getenv("DTX_ACTIVE_MODEL")
+    strict_replay = bool(
+        os.getenv("DTX_REPLAY_STRICT", "0") == "1"
+        or metadata.get("replay_strict") is True
+    )
+
     fallback = _rule_based_detect(event)
-    runtime = load_runtime_model()
+    runtime = load_runtime_model(
+        requested_model=str(requested_model) if requested_model else None,
+        strict_selection=strict_replay,
+    )
+
+    metadata["requested_model"] = str(requested_model) if requested_model else runtime.key
+    metadata["runtime_model"] = runtime.key
+    metadata["runtime_model_family"] = runtime.family
+    metadata["runtime_model_available"] = bool(runtime.available)
+    if runtime.reason:
+        metadata["runtime_model_reason"] = runtime.reason
+    event.metadata = metadata
+
+    if strict_replay and not runtime.available:
+        raise RuntimeError(
+            f"Strict replay mode enabled and model is unavailable: {runtime.reason or runtime.key}"
+        )
+
     if not runtime.available:
         return fallback
 
     if runtime.family in {"lightgbm", "random_forest", "xgboost"}:
         try:
-            return _merge_with_guardrails(_run_tree_model(event, runtime), fallback)
+            result = _run_tree_model(event, runtime)
+            return _merge_with_guardrails(result, fallback) if not strict_replay else result
         except Exception:
+            if strict_replay:
+                raise
             return fallback
 
     if runtime.family == "lstm_autoencoder_pytorch":
+        if strict_replay and runtime.metadata.get("default_threshold") is None:
+            raise RuntimeError(
+                "Strict replay mode requires a numeric LSTM-AE threshold; metadata.default_threshold is null"
+            )
         try:
-            return _merge_with_guardrails(_run_lstm_autoencoder(event, runtime), fallback)
+            result = _run_lstm_autoencoder(event, runtime)
+            return _merge_with_guardrails(result, fallback) if not strict_replay else result
         except Exception:
+            if strict_replay:
+                raise
             return fallback
+
+    if strict_replay:
+        raise RuntimeError(f"Strict replay mode does not support model family '{runtime.family}'")
 
     return fallback

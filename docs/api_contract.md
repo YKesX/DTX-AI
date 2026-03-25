@@ -47,7 +47,17 @@ Ingest a warehouse sensor event and trigger the AI pipeline.
     "temperature": 82.3,
     "humidity": 41.0,
     "pressure": 1012.0,
-    "metadata": {}
+    "metadata": {
+      "source": "dataset_replay",
+      "dataset": "ziya",
+      "split": "test",
+      "row_id": 123,
+      "ground_truth_name": "bearing_fault",
+      "active_model": "random_forest",
+      "runtime_model": "random_forest",
+      "predicted_label": "bearing_fault",
+      "prediction_correct": true
+    }
   },
   "anomaly": {
     "event_id": "uuid",
@@ -69,6 +79,26 @@ Ingest a warehouse sensor event and trigger the AI pipeline.
 ```
 
 **Severity values**: `info` | `warning` | `critical`
+
+---
+
+### `GET /metrics/live`
+
+Returns in-memory replay validation metrics (dataset replay mode).
+
+**Response 200**
+```json
+{
+  "total_replayed": 100,
+  "total_correct": 64,
+  "running_accuracy": 0.64,
+  "per_class_ground_truth": {"no_fault": 30, "bearing_fault": 40, "overheating": 30},
+  "per_class_predicted": {"no_fault": 28, "bearing_fault": 45, "overheating": 27},
+  "confusion_counts": {"bearing_fault->bearing_fault": 25},
+  "per_model": {"random_forest": 100},
+  "last_updated": "2026-03-25T12:00:00Z"
+}
+```
 
 ---
 
@@ -138,6 +168,11 @@ deduplication and row selection work correctly across sources.
 | `is_anomaly` | `anomaly.is_anomaly` | `is_anomaly` (bool coerced) |
 | `top_features` | derived from `explanation.contributing_features` dict | `[]` (not stored) |
 | `explanation` | `summary + " " + recommendation` | `summary` |
+| `source` | `event.metadata.source` | parsed from `raw_payload.metadata.source` |
+| `active_model` | `event.metadata.runtime_model \/ active_model` | parsed from `raw_payload.metadata` |
+| `ground_truth_name` | `event.metadata.ground_truth_name` | parsed from `raw_payload.metadata` |
+| `predicted_label` | `event.metadata.predicted_label` | parsed from `raw_payload.metadata` |
+| `prediction_correct` | `event.metadata.prediction_correct` | parsed from `raw_payload.metadata` |
 
 ---
 
@@ -168,7 +203,7 @@ See `packages/shared/schemas.py` for the full Pydantic definitions.
 
 ---
 
-## Demo event seeder
+## Demo seeders
 
 ```bash
 # Quick mixed demo (10 events, 0.8 s apart)
@@ -179,6 +214,12 @@ python scripts/seed_demo_events.py --scenario overheating --count 5
 
 # All options
 python scripts/seed_demo_events.py --help
+```
+
+Dataset replay validation:
+
+```bash
+python scripts/replay_dataset_demo.py --model random_forest --split test --limit 100 --delay 0.5 --source ziya --strict
 ```
 
 Available scenarios: `normal`, `bearing_fault`, `overheating`, `combined`, `mixed`, `gradual_drift`, `intermittent_spike`

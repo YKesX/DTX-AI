@@ -67,6 +67,18 @@ export default function ExplanationPanel({ event }) {
         </span>
       </div>
 
+      {(event.source || event.active_model || event.ground_truth_name || event.predicted_label) && (
+        <div className="bg-gray-700/20 border border-gray-700 rounded-lg p-3 text-xs text-gray-300 space-y-1">
+          <p>Kaynak: {event.source ?? 'synthetic'}</p>
+          <p>Model: {event.active_model ?? 'n/a'}</p>
+          <p>Ground Truth: {event.ground_truth_name ?? '—'}</p>
+          <p>Prediction: {event.predicted_label ?? '—'}</p>
+          <p>
+            Sonuç: {event.prediction_correct == null ? '—' : event.prediction_correct ? 'Doğru' : 'Yanlış'}
+          </p>
+        </div>
+      )}
+
       {/* Top features */}
       {topFeatures.length > 0 && (
         <div>

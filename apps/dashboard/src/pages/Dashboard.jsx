@@ -64,6 +64,25 @@ function deriveTrend(events) {
 export default function Dashboard() {
   const { events, setEvents, status } = useWebSocket(WS_URL);
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [liveMetrics, setLiveMetrics] = useState(null);
+
+  const handleClearLogs = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/alerts/clear`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch {
+      // keep UI usable even if API clear fails
+    } finally {
+      setEvents([]);
+      setSelectedEvent(null);
+      setLiveMetrics((prev) => ({
+        ...(prev ?? {}),
+        total_replayed: 0,
+        total_correct: 0,
+        running_accuracy: 0,
+      }));
+    }
+  };
 
   // On mount, seed the list with events already stored in the API.
   // GET /alerts/ returns { alerts: [...EventLog rows], count: N }
@@ -95,13 +114,40 @@ export default function Dashboard() {
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadMetrics = () => {
+      fetch(`${API_BASE}/metrics/live`)
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then((data) => {
+          if (!cancelled) setLiveMetrics(data);
+        })
+        .catch(() => {
+          if (!cancelled) setLiveMetrics(null);
+        });
+    };
+
+    loadMetrics();
+    const timer = setInterval(loadMetrics, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+
   const summary = useMemo(() => deriveStatus(events), [events]);
   const trendData = useMemo(() => deriveTrend(events), [events]);
 
   return (
     <div className="space-y-5">
       {/* Status cards — full width */}
-      <StatusCards {...summary} />
+      <StatusCards
+        {...summary}
+        replayMetrics={liveMetrics}
+      />
 
       {/* Middle row: table (60%) + explanation (40%) */}
       <div className="flex gap-5">
@@ -110,6 +156,7 @@ export default function Dashboard() {
             events={events}
             onSelectEvent={setSelectedEvent}
             selectedId={selectedEvent?.id}
+            onClearLogs={handleClearLogs}
           />
         </div>
         <div className="w-[40%]">

@@ -3,8 +3,11 @@
 ## System Context
 
 DTX-AI is a university capstone project that demonstrates AI-driven anomaly
-detection, explainability (XAI), and digital-twin synchronisation for a
-simulated smart warehouse.
+detection, explainability (XAI), and operator visibility for a
+smart warehouse software stack.
+
+Current critical demo path excludes Isaac Sim and focuses on real API ingestion,
+runtime model inference, explanation, and dashboard visibility.
 
 ---
 
@@ -18,7 +21,7 @@ simulated smart warehouse.
                       │ HTTP / WebSocket
 ┌─────────────────────▼───────────────────────────────────────┐
 │                  apps/api  (FastAPI)                        │
-│  POST /events   GET /alerts   GET /health   WS /ws/events   │
+│  POST /events   GET /alerts   GET /health   GET /metrics/live  WS /ws/events   │
 │                      │                                      │
 │            calls services/ai pipeline                       │
 │                      │                                      │
@@ -28,8 +31,12 @@ simulated smart warehouse.
 │  └───────────────────┬──────────────────┘                   │
 │                      │ TwinUpdate                           │
 │  ┌───────────────────▼──────────────────┐                   │
+│  │      in-memory replay metrics        │                   │
+│  └───────────────────┬──────────────────┘                   │
+│                      │                                      │
+│  ┌───────────────────▼──────────────────┐                   │
 │  │          apps/sim adapter            │                   │
-│  │  (optional — skipped if not present) │                   │
+│  │   (optional / later integration)     │                   │
 │  └───────────────────┬──────────────────┘                   │
 └────────────────────────────────────────────────────────────-┘
                        │
@@ -57,11 +64,13 @@ simulated smart warehouse.
 ## Data Flow (MVP)
 
 1. **Event ingested** — `POST /events` receives an `EventIn` JSON payload.
+    Source can be synthetic seeding or dataset replay.
 2. **AI pipeline** — `services/ai.pipeline.run_pipeline(event)` returns `(AnomalyResult, ExplanationResult)`.
 3. **Persistence** — the API inserts an `EventLog` row into SQLite.
-4. **Broadcast** — a `DashboardAlert` (event + anomaly + explanation) is sent over WebSocket.
-5. **Digital twin** — a `TwinUpdate` is passed to `apps/sim.adapter.notify()`.
-6. **Dashboard** — the React frontend receives the WebSocket message and updates the UI.
+4. **Replay metrics** — if `event.metadata.source=dataset_replay`, running metrics are updated in memory.
+5. **Broadcast** — a `DashboardAlert` (event + anomaly + explanation) is sent over WebSocket.
+6. **Digital twin** — a `TwinUpdate` is passed to `apps/sim.adapter.notify()` (optional).
+7. **Dashboard** — the React frontend receives the WebSocket message and updates the UI.
 
 ---
 

@@ -1,4 +1,4 @@
-# Demo Script — DTX-AI MVP
+# Demo Script — DTX-AI Current Stage
 
 **Audience:** Capstone supervisors, stakeholders  
 **Duration:** ~10 minutes  
@@ -8,10 +8,9 @@
 
 ## Part 1 — Introduction (2 min)
 
-> "DTX-AI is a Smart Warehouse Digital Twin powered by AI anomaly detection
-> and explainable AI.  Today we'll walk through a live demo of the MVP vertical
-> slice: from a synthetic sensor event to a visual alert with a plain-language
-> explanation."
+> "DTX-AI is a smart warehouse AI monitoring platform. Today we show two
+> software demo modes: synthetic plumbing and dataset replay validation. The
+> replay mode is the proof that real trained models are driving predictions."
 
 Point to the architecture diagram in `docs/architecture.md`.
 
@@ -29,7 +28,7 @@ Open two browser tabs:
 
 ---
 
-## Part 3 — Send a Normal Event (2 min)
+## Part 3 — Synthetic mode smoke (2 min)
 
 Using the API docs (`POST /events`), send:
 
@@ -49,7 +48,23 @@ Using the API docs (`POST /events`), send:
 
 ---
 
-## Part 4 — Trigger an Anomaly (3 min)
+## Part 4 — Dataset replay validation mode (3 min)
+
+Run:
+
+```bash
+bash scripts/run_demo.sh --mode replay --model random_forest --split test --count 30 --delay 0.4 --strict-replay
+```
+
+Narration points:
+
+- input source is dataset replay (`source=dataset_replay`)
+- selected model is shown (`runtime_model`)
+- each event includes ground truth vs predicted label
+- dashboard shows correct/wrong and running replay accuracy
+- `/metrics/live` increments during replay
+
+## Part 5 — Manual anomaly event (2 min)
 
 Send an anomalous event:
 
@@ -71,7 +86,7 @@ Send an anomalous event:
 
 ---
 
-## Part 5 — Seed Batch Events (1 min)
+## Part 6 — Seed batch events (1 min)
 
 ```bash
 python scripts/seed_events.py
@@ -82,9 +97,9 @@ python scripts/seed_events.py
 
 ---
 
-## Part 6 — Wrap-Up (1 min)
+## Part 7 — Wrap-Up (1 min)
 
 Highlight the architecture slide and outline next milestones:
-- Sprint 2: Train a real Isolation Forest model on the synthetic data.
-- Sprint 3: Connect the Isaac Sim digital-twin scene.
-- Sprint 4: Integrate ESP32 real sensor stream.
+- Keep improving replay validation quality and reporting.
+- Add Isaac Sim integration in the later stage.
+- Add hardware sensor stream integration in the later stage.
