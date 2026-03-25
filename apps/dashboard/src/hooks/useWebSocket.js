@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { mockEvents } from '../lib/mockData';
+import { normalizeAlert, normalizeAlerts } from '../lib/normalizeAlert';
 
 export function useWebSocket(url = null) {
   const [events, setEvents] = useState([]);
@@ -20,8 +21,11 @@ export function useWebSocket(url = null) {
 
     ws.onmessage = (e) => {
       try {
-        const data = JSON.parse(e.data);
-        setEvents((prev) => [data, ...prev.slice(0, 49)]);
+        const raw = JSON.parse(e.data);
+        const normalized = normalizeAlert(raw);
+        if (normalized) {
+          setEvents((prev) => [normalized, ...prev.slice(0, 49)]);
+        }
       } catch {
         // ignore malformed frames
       }
@@ -40,8 +44,8 @@ export function useWebSocket(url = null) {
 
   useEffect(() => {
     if (!url) {
-      // Mock mode
-      setEvents(mockEvents);
+      // Mock mode — normalise mock data so it uses the same view-model shape
+      setEvents(normalizeAlerts(mockEvents));
       setStatus('connected');
       return;
     }

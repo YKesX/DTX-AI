@@ -47,7 +47,8 @@ export default function EventTable({ events = [], onSelectEvent, selectedId }) {
           </thead>
           <tbody>
             {events.map((evt) => {
-              const isSelected = evt.id === selectedId;
+              const rowId = evt.id ?? evt.alert_id ?? evt.event_id;
+              const isSelected = rowId === selectedId;
               const time = new Date(evt.timestamp).toLocaleTimeString('tr-TR', {
                 hour: '2-digit',
                 minute: '2-digit',
@@ -55,7 +56,7 @@ export default function EventTable({ events = [], onSelectEvent, selectedId }) {
               });
               return (
                 <tr
-                  key={evt.id}
+                  key={rowId}
                   onClick={() => onSelectEvent(evt)}
                   className={`border-b border-gray-700/50 cursor-pointer transition-colors ${
                     isSelected
@@ -64,7 +65,7 @@ export default function EventTable({ events = [], onSelectEvent, selectedId }) {
                   }`}
                 >
                   <td className="px-5 py-3 text-gray-400 font-mono text-xs">{time}</td>
-                  <td className="px-5 py-3 text-white font-medium">{evt.entity ?? evt.entity_id}</td>
+                  <td className="px-5 py-3 text-white font-medium">{evt.entity_id || evt.entity}</td>
                   <td className="px-5 py-3 text-gray-300">{evt.anomaly_type}</td>
                   <td className="px-5 py-3">
                     <ScoreBar score={evt.anomaly_score} />

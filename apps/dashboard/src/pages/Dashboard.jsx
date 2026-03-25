@@ -4,9 +4,14 @@ import StatusCards from '../components/dashboard/StatusCards';
 import EventTable from '../components/dashboard/EventTable';
 import ExplanationPanel from '../components/dashboard/ExplanationPanel';
 import TrendChart from '../components/dashboard/TrendChart';
+import { normalizeAlerts } from '../lib/normalizeAlert';
 
-const WS_URL = 'ws://localhost:8000/ws/events';
-const REST_URL = 'http://localhost:8000/events';
+// Use environment variables defined in .env (copy from .env.example).
+// Falls back to localhost defaults for convenience during development.
+const WS_URL =
+  import.meta.env.VITE_WS_URL ?? 'ws://localhost:8000/ws/events';
+const API_BASE =
+  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
 function deriveStatus(events) {
   if (!events.length) {
@@ -18,14 +23,13 @@ function deriveStatus(events) {
     };
   }
 
+  // Backend severities: info | warning | critical
   const activeAlerts = events.filter(
-    (e) => e.severity === 'high' || e.severity === 'critical'
+    (e) => ['warning', 'critical', 'high'].includes(e.severity)
   ).length;
 
   const connectedSensors = new Set(
-    events
-      .map((e) => e.entity_id ?? e.entity)
-      .filter(Boolean)
+    events.map((e) => e.entity_id || e.entity).filter(Boolean)
   ).size;
 
   const latest = events.reduce((a, b) =>
@@ -38,8 +42,8 @@ function deriveStatus(events) {
   });
 
   const hasCritical = events.some((e) => e.severity === 'critical');
-  const hasHigh = events.some((e) => e.severity === 'high');
-  const systemStatus = hasCritical ? 'Kritik' : hasHigh ? 'Uyarı' : 'Çevrimiçi';
+  const hasWarning = events.some((e) => e.severity === 'warning' || e.severity === 'high');
+  const systemStatus = hasCritical ? 'Kritik' : hasWarning ? 'Uyarı' : 'Çevrimiçi';
 
   return { activeAlerts, connectedSensors, lastDataTime, systemStatus };
 }
@@ -61,24 +65,33 @@ export default function Dashboard() {
   const { events, setEvents, status } = useWebSocket(WS_URL);
   const [selectedEvent, setSelectedEvent] = useState(null);
 
-  // On mount, seed the list with events already stored in the API
+  // On mount, seed the list with events already stored in the API.
+  // GET /alerts/ returns { alerts: [...EventLog rows], count: N }
   useEffect(() => {
-    fetch(REST_URL)
+    fetch(`${API_BASE}/alerts/`)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
       .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setEvents((prev) => {
-            const existingIds = new Set(prev.map((e) => e.event_id ?? e.id));
-            const fresh = data.filter((e) => !existingIds.has(e.event_id ?? e.id));
-            return [...prev, ...fresh];
-          });
-        }
+        // Accept both { alerts: [...] } and a bare array for flexibility
+        const rows = Array.isArray(data) ? data : (data.alerts ?? []);
+        if (rows.length === 0) return;
+        const normalized = normalizeAlerts(rows);
+        setEvents((prev) => {
+          // Use a stable identifier (prefer event_id, fall back to id) to avoid
+          // duplicates when the same event is received from both REST and WS.
+          const existingKeys = new Set(
+            prev.map((e) => (e.event_id != null ? e.event_id : e.id))
+          );
+          const fresh = normalized.filter(
+            (e) => !existingKeys.has(e.event_id != null ? e.event_id : e.id)
+          );
+          return [...prev, ...fresh];
+        });
       })
       .catch(() => {
-        // API not reachable — fall back to whatever WS/mock provides
+        // API not reachable — fall back to whatever WS / mock provides
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -96,7 +109,7 @@ export default function Dashboard() {
           <EventTable
             events={events}
             onSelectEvent={setSelectedEvent}
-            selectedId={selectedEvent?.event_id ?? selectedEvent?.id}
+            selectedId={selectedEvent?.id}
           />
         </div>
         <div className="w-[40%]">
