@@ -181,7 +181,7 @@ python scripts/seed_demo_events.py --scenario overheating --count 5
 python scripts/seed_demo_events.py --help
 ```
 
-Available scenarios: `normal`, `bearing_fault`, `overheating`, `combined`, `mixed`
+Available scenarios: `normal`, `bearing_fault`, `overheating`, `combined`, `mixed`, `gradual_drift`, `intermittent_spike`
 
 ---
 
@@ -208,4 +208,3 @@ Synthetic events from Isaac Sim can enter the system through the same
 `POST /events/` endpoint. The `apps/sim/sim/adapter.py` already has a
 `notify(TwinUpdate)` hook that is called (fire-and-forget) by the API on
 every anomaly. No changes to the dashboard or normalisation layer are needed.
-

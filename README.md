@@ -1,110 +1,145 @@
-# DTX-AI — Smart Warehouse XAI Digital Twin
+# DTX-AI — Smart Warehouse Anomaly Detection + Explainable AI
 
-> **University Capstone Project** — AI anomaly detection, explainability, digital-twin synchronisation, and a lightweight live web dashboard for a smart warehouse scenario.
+DTX-AI is a university capstone project focused on smart warehouse monitoring with anomaly detection, explainable AI (XAI), a live backend API, and a live web dashboard.
 
----
+## Whole project scope
 
-## Architecture Overview
+- smart warehouse anomaly detection
+- explainable AI
+- live backend API
+- live web dashboard
+- reproducible demo scenario generation
+- **later** digital twin integration with NVIDIA Isaac Sim
+- **later** hardware integration with ESP32 (or similar real sensor streams)
+
+## Current project stage
+
+The current stage is the **software demo core**, not the final full system.
+
+Current end-to-end path intentionally excludes Isaac Sim and focuses on:
+
+1. environment setup
+2. backend startup
+3. dashboard startup
+4. scenario generation / event seeding
+5. API ingestion
+6. runtime inference with active model selection
+7. explanation generation
+8. API persistence + websocket broadcast
+9. dashboard rendering (score, severity, explanation, top features)
+
+## Current architecture flow
 
 ```
-DTX-AI/
-├── apps/
-│   ├── api/          # FastAPI backend — event ingestion, alert distribution, WebSocket
-│   ├── dashboard/    # React + Vite frontend — live alerts, explanation panel, event log
-│   └── sim/          # NVIDIA Isaac Sim adapter — isolated digital-twin sync hooks
-├── services/
-│   └── ai/           # Anomaly detection + XAI explanation pipeline
-├── packages/
-│   └── shared/       # Canonical event schemas (EventIn, AnomalyResult, …)
-├── data/             # Synthetic sample events and local SQLite storage
-├── docs/             # Architecture, Kanban, sprint plans, demo script
-├── scripts/          # Developer convenience: setup, seed, run-dev
-└── tests/            # Smoke + integration tests
+[scenario generator / seeded events]
+             │
+             ▼
+        POST /events/
+        (FastAPI backend)
+             │
+             ▼
+    services/ai runtime pipeline
+    - detector (model registry + fallback)
+    - explainer (tree XAI + fallback)
+             │
+             ├── SQLite persistence
+             └── WS broadcast (/ws/events)
+                          │
+                          ▼
+                    React dashboard
 ```
 
-### MVP Data Flow
+## Current runtime model support
 
-```
-[seed / manual event]
-        │
-        ▼
-  POST /events  (apps/api)
-        │
-        ▼
-  AI Pipeline  (services/ai)
-  anomaly_score + anomaly_type + explanation
-        │
-        ├──► WebSocket /ws/events  ──►  Dashboard (apps/dashboard)
-        │
-        └──► Isaac Sim adapter     ──►  Digital-twin object status update
-```
+Runtime artifacts are under `services/ai/ai/models/` and selected by:
 
----
+- `services/ai/ai/models/shared/model_registry.json` (`active_model`)
+- optional runtime override: `DTX_ACTIVE_MODEL=<model_key>`
 
-## Quick-Start (local MVP)
+Supported families:
 
-### Prerequisites
-- Python 3.11+
-- Node.js 20+
-- (Optional) NVIDIA Isaac Sim 4.x for full digital-twin features
+- LightGBM (`lightgbm`)
+- RandomForest (`random_forest`)
+- XGBoost (`xgboost`)
+- LSTM-AE (`lstm_ae`)
+
+Behavior notes:
+
+- tree models use shared scaler + canonical feature order and produce explanation payloads compatible with API/dashboard normalization
+- tree XAI uses `services/ai/xai_explainer.py` when possible, with graceful fallback if unavailable
+- LSTM-AE loading is explicit; threshold is used only when defined in metadata
+- if selected model is incomplete/unloadable, runtime falls back cleanly so demo flow remains usable
+
+## Quick start (current demo path)
+
+### 1) Setup
 
 ```bash
-# 1. Clone and enter the repo
-git clone https://github.com/YKesX/DTX-AI.git
 cd DTX-AI
-
-# 2. Run the automated setup
 bash scripts/setup.sh
-
-# 3. Start all local services (opens three terminals)
-bash scripts/run_dev.sh
-
-# 4. (In a separate terminal, after the API is up) seed sample events
-python scripts/seed_events.py
 ```
 
-Dashboard → http://localhost:5173  
-API docs  → http://localhost:8000/docs
-
----
-
-## Environment Variables
-
-Copy the example files and fill in your values:
+### 2) Run one-command demo
 
 ```bash
-cp apps/api/.env.example apps/api/.env
-cp apps/sim/.env.example apps/sim/.env
+bash scripts/run_demo.sh --scenario mixed --count 10 --delay 0.8
 ```
 
----
+Example options:
 
-## Tech Stack
+```bash
+bash scripts/run_demo.sh --setup --model lightgbm --scenario combined --count 12 --delay 0.6
+bash scripts/run_demo.sh --model random_forest --scenario gradual_drift
+bash scripts/run_demo.sh --no-seed
+```
 
-| Layer | Technology |
-|-------|-----------|
-| Backend API | Python 3.11, FastAPI, Uvicorn |
-| AI / XAI | Python, scikit-learn (stub), SHAP (stub) |
-| Frontend | React 18, Vite, Tailwind CSS |
-| Storage | SQLite (MVP) |
-| Digital Twin | NVIDIA Isaac Sim 4 (optional, isolated adapter) |
-| CI | GitHub Actions (lint + test) |
+### 3) URLs
 
----
+- API docs: http://localhost:8000/docs
+- Dashboard: http://localhost:5173
 
-## Contributing
+## Supported demo scenarios
 
-See [docs/kanban_workflow.md](docs/kanban_workflow.md) for the team Kanban process,
-[docs/sprint_1_plan.md](docs/sprint_1_plan.md) for the first sprint plan,
-and [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming and commit conventions.
+- `normal`
+- `bearing_fault`
+- `overheating`
+- `combined`
+- `mixed`
+- `gradual_drift`
+- `intermittent_spike`
 
----
+You can run scenario generation directly:
 
-## Project Goal
+```bash
+python scripts/seed_demo_events.py --scenario mixed --count 10 --delay 0.8
+```
 
-Produce a convincing end-to-end demo where:
+## Model artifacts and registry files
 
-1. A synthetic or manually triggered warehouse event arrives at the API.
-2. The AI service scores the event and generates a plain-language explanation.
-3. The Isaac Sim digital twin updates the affected asset's visual status.
-4. The web dashboard displays the alert, explanation, and event history in real time.
+Shared:
+
+- `services/ai/ai/models/shared/model_registry.json`
+- `services/ai/ai/models/shared/feature_order.json`
+- `services/ai/ai/models/shared/scaler.pkl`
+
+Per model family:
+
+- `services/ai/ai/models/lightgbm/`
+- `services/ai/ai/models/random_forest/`
+- `services/ai/ai/models/xgboost/`
+- `services/ai/ai/models/lstm_ae/`
+
+Metadata files define model family assumptions, class mapping, and runtime notes.
+
+## Current limitations (important)
+
+- Isaac Sim is excluded from this current software demo path
+- training notebooks are separate and not part of runtime integration
+- LSTM-AE may require explicit threshold configuration (`default_threshold`) before full anomaly-threshold behavior is active
+- model metrics come from different data splits across artifacts; avoid overselling direct comparability
+
+## Additional docs
+
+- API contract: `docs/api_contract.md`
+- Architecture: `docs/architecture.md`
+- Current usage details: `docs/current_usage.md`

@@ -1,18 +1,9 @@
-"""
-XAI explanation generator — MVP stub.
-
-Uses rule-based feature attribution for now.
-Replace `explain()` internals with SHAP values once a real model is trained.
-"""
+"""XAI explanation generator with tree-model support and graceful fallbacks."""
 
 from __future__ import annotations
 
-import sys
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../packages"))
-
 from shared.schemas import AnomalyResult, ExplanationResult, EventIn
+from ai.model_loader import load_runtime_model
 
 _THRESHOLDS = {
     "vibration": 10.0,
@@ -31,7 +22,7 @@ _RECOMMENDATIONS = {
 }
 
 
-def explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
+def _fallback_explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
     """
     Generate a human-readable explanation for an anomaly result.
 
@@ -83,3 +74,81 @@ def explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
         contributing_features=normalised,
         recommendation=recommendation,
     )
+
+
+def explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
+    runtime = load_runtime_model()
+    if runtime.available and runtime.supports_tree_xai and runtime.model is not None:
+        try:
+            # services/ is on PYTHONPATH in dev/test/CI, so import via ai namespace.
+            from ai.xai_explainer import FEATURES, generate_xai_report
+
+            sensor_values = {
+                "Vibration (mm/s)": float(event.vibration or 0.0),
+                "Temperature (°C)": float(event.temperature or 0.0),
+                "Pressure (bar)": float(event.pressure or 0.0),
+            }
+            feature_values = {
+                "Vibration (mm/s)": sensor_values["Vibration (mm/s)"],
+                "Temperature (°C)": sensor_values["Temperature (°C)"],
+                "Pressure (bar)": sensor_values["Pressure (bar)"],
+                "vib_rolling_mean": sensor_values["Vibration (mm/s)"],
+                "vib_rolling_std": 0.0,
+                "vib_rolling_max": sensor_values["Vibration (mm/s)"],
+                "temp_rolling_mean": sensor_values["Temperature (°C)"],
+                "temp_drift": 0.0,
+                "pressure_rolling_mean": sensor_values["Pressure (bar)"],
+            }
+            ordered = [feature_values.get(f, 0.0) for f in runtime.feature_order or FEATURES]
+            if runtime.scaler is not None:
+                transformed = runtime.scaler.transform([ordered])[0]
+            else:
+                transformed = ordered
+            input_features = {
+                (runtime.feature_order or FEATURES)[i]: float(transformed[i])
+                for i in range(len(runtime.feature_order or FEATURES))
+            }
+            class_map = {
+                "vibration": "bearing_fault",
+                "temperature": "overheating",
+                "unknown": "no_fault",
+                "combined": "bearing_fault",
+                "humidity": "bearing_fault",
+                "pressure": "bearing_fault",
+            }
+            live_json = {
+                "timestamp": event.timestamp.isoformat(),
+                "anomaly_class": class_map.get(anomaly.anomaly_type.value, "no_fault"),
+                "anomaly_score": anomaly.anomaly_score,
+                "input_features": input_features,
+            }
+            report = generate_xai_report(runtime.model, live_json)
+            contributing = {
+                item["feature"]: float(item.get("shap_value", 0.0))
+                for item in report.get("top_features", [])
+            }
+            return ExplanationResult(
+                event_id=event.event_id,
+                summary=report.get("explanation_text", ""),
+                contributing_features=contributing,
+                recommendation=_RECOMMENDATIONS.get(
+                    anomaly.anomaly_type.value,
+                    _RECOMMENDATIONS["unknown"],
+                ),
+            )
+        except Exception:
+            return _fallback_explain(event, anomaly)
+
+    if runtime.available and runtime.family == "lstm_autoencoder_pytorch":
+        summary = (
+            f"LSTM-AE runtime used for asset '{event.asset_id}'. "
+            f"Anomaly score={anomaly.anomaly_score:.2f}, severity={anomaly.severity.value}."
+        )
+        return ExplanationResult(
+            event_id=event.event_id,
+            summary=summary,
+            contributing_features={},
+            recommendation="Review temporal sensor trend and reconstruction error monitor.",
+        )
+
+    return _fallback_explain(event, anomaly)
