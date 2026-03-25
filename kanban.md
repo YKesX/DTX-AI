@@ -1,14 +1,19 @@
-| To Do                           | In Progress              | Done                 |
-|---------------------------------|-------------------------|----------------------|
-| DT-01 Mini repo sainresi        |                         |                      |
-| DT-02 Entity playback           |                         |                      |
-| AI-01 Core feature extraction    |                         |                      |
-| AI-02 Event scoring             |                         |                      |
-| XAI-01 Top feature explanation   |                         |                      |
-| DT-03 Alert visualization       |                         |                      |
-| WEB-01 Canlı durum paneli       |                         |                      |
-| WEB-02 Olay tablosu            |                         |                      |
-| WEB-03 Trend grafiği           |                         |                      |
-| HW-01 ESP32 health input        |                         |                      |
-| OPS-01 Replay mode              |                         |                      |
-| OPS-02 Kanban ölçüleri        |                         |                      |
+# Kanban Board
+
+## Done
+- Feature 1: Description of feature 1
+- Feature 2: Description of feature 2
+- Feature 3: Description of feature 3
+- Feature 4: Description of feature 4
+
+## In Progress
+- Feature 5: Description of feature 5
+- Feature 6: Description of feature 6
+
+## To Do
+- Feature 7: Description of feature 7
+- Feature 8: Description of feature 8
+- Feature 9: Description of feature 9
+- Feature 10: Description of feature 10
+- Feature 11: Description of feature 11
+- Feature 12: Description of feature 12
