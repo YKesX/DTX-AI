@@ -16,6 +16,7 @@ try:
     from main import app
     from api.database import init_db
     from api.live_metrics import live_metrics
+    from api.routes.events import _normalize_gt_label
     _HTTPX_AVAILABLE = True
 except ImportError:
     _HTTPX_AVAILABLE = False
@@ -94,6 +95,39 @@ async def test_post_event_dataset_replay_metadata_and_metrics():
         metrics = metrics_resp.json()
         assert metrics["total_replayed"] >= 1
         assert "running_accuracy" in metrics
+
+
+@pytest.mark.asyncio
+async def test_post_event_dataset_replay_numeric_gt_label_normalized():
+    """Numeric ground_truth_label (e.g. '1') must be normalized to the canonical
+    label name (e.g. 'bearing_fault') before comparing against predicted_label so
+    that correct predictions are not falsely marked as incorrect."""
+    payload = {
+        "asset_id": "replay-machine-02",
+        "zone_id": "zone-R",
+        "vibration": 16.0,
+        "temperature": 85.0,
+        "humidity": 35.0,
+        "pressure": 1015.0,
+        "metadata": {
+            "source": "dataset_replay",
+            # Only provide the numeric code — ground_truth_name intentionally absent.
+            "ground_truth_label": "1",
+            "active_model": "random_forest",
+        },
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/events/", json=payload)
+        assert resp.status_code == 202
+        meta = resp.json()["event"]["metadata"]
+        assert "prediction_correct" in meta
+        # predicted_label should always be a canonical name, never a raw numeric code.
+        assert meta["predicted_label"] in {"no_fault", "bearing_fault", "overheating", "combined", "unknown"}
+        # prediction_correct must reflect the normalized comparison, not a raw-vs-canonical mismatch.
+        predicted = meta["predicted_label"]
+        # ground_truth_label "1" normalizes to "bearing_fault" via _normalize_gt_label.
+        expected_correct = predicted == _normalize_gt_label("1")
+        assert meta["prediction_correct"] == expected_correct
 
 
 @pytest.mark.asyncio

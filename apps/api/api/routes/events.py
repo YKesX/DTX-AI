@@ -32,6 +32,41 @@ def _anomaly_type_to_label(anomaly_type: str) -> str:
     return mapping.get(anomaly_type, "unknown")
 
 
+# Maps numeric class codes and common aliases to canonical label names used in
+# predicted_label so that ground_truth_label comparisons are always apples-to-apples.
+# Identity entries for canonical names are included so that any raw ground_truth_name
+# value that is already canonical also passes through the same normalisation path.
+_GT_LABEL_MAP: dict[str, str] = {
+    # Numeric class codes (as emitted by dataset CSVs)
+    "0": "no_fault",
+    "1": "bearing_fault",
+    "2": "overheating",
+    "3": "combined",
+    # Canonical names — identity mappings ensure lowercased input is also handled
+    "no_fault": "no_fault",
+    "bearing_fault": "bearing_fault",
+    "overheating": "overheating",
+    "combined": "combined",
+    # Human-readable aliases
+    "normal": "no_fault",
+    "vibration": "bearing_fault",
+    "temperature": "overheating",
+}
+
+
+def _normalize_gt_label(raw: str) -> str:
+    """Translate a raw ground-truth label to a canonical label name.
+
+    Handles numeric class codes (e.g. ``"1"``), human-readable aliases
+    (e.g. ``"normal"``, ``"vibration"``), and already-canonical names
+    (e.g. ``"bearing_fault"``).  Any value not found in the map is returned
+    as-is (lowercased and stripped) so that novel labels surface rather than
+    being silently swallowed.
+    """
+    key = str(raw).strip().lower()
+    return _GT_LABEL_MAP.get(key, key)
+
+
 def _build_twin_update(event: EventIn, anomaly: AnomalyResult) -> TwinUpdate:
     status_map = {
         "critical": AssetStatus.FAULT,
@@ -83,11 +118,12 @@ async def ingest_event(event: EventIn):
     metadata["predicted_score"] = float(anomaly.anomaly_score)
 
     if source == "dataset_replay":
-        gt_name = str(
+        gt_raw = str(
             metadata.get("ground_truth_name")
             or metadata.get("ground_truth_label")
             or "unknown"
         )
+        gt_name = _normalize_gt_label(gt_raw)
         correct = gt_name == predicted_label
         metadata["prediction_correct"] = correct
         live_metrics.update(
