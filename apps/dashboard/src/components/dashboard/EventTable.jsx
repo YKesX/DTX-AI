@@ -40,6 +40,11 @@ export default function EventTable({ events = [], onSelectEvent, selectedId }) {
               <th className="text-left px-5 py-3">Zaman</th>
               <th className="text-left px-5 py-3">Varlık</th>
               <th className="text-left px-5 py-3">Anomali Tipi</th>
+              <th className="text-left px-5 py-3">Kaynak</th>
+              <th className="text-left px-5 py-3">Model</th>
+              <th className="text-left px-5 py-3">GT</th>
+              <th className="text-left px-5 py-3">Pred</th>
+              <th className="text-left px-5 py-3">Doğru</th>
               <th className="text-left px-5 py-3">Skor</th>
               <th className="text-left px-5 py-3">Önem</th>
               <th className="text-left px-5 py-3">Detay</th>
@@ -67,6 +72,13 @@ export default function EventTable({ events = [], onSelectEvent, selectedId }) {
                   <td className="px-5 py-3 text-gray-400 font-mono text-xs">{time}</td>
                   <td className="px-5 py-3 text-white font-medium">{evt.entity_id || evt.entity}</td>
                   <td className="px-5 py-3 text-gray-300">{evt.anomaly_type}</td>
+                  <td className="px-5 py-3 text-gray-300">{evt.source ?? 'synthetic'}</td>
+                  <td className="px-5 py-3 text-gray-300">{evt.active_model ?? 'n/a'}</td>
+                  <td className="px-5 py-3 text-gray-300">{evt.ground_truth_name ?? '—'}</td>
+                  <td className="px-5 py-3 text-gray-300">{evt.predicted_label ?? '—'}</td>
+                  <td className="px-5 py-3 text-gray-300">
+                    {evt.prediction_correct == null ? '—' : evt.prediction_correct ? '✓' : '✗'}
+                  </td>
                   <td className="px-5 py-3">
                     <ScoreBar score={evt.anomaly_score} />
                   </td>

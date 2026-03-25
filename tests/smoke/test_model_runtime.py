@@ -67,3 +67,31 @@ def test_lstm_ae_missing_threshold_graceful(monkeypatch):
     assert 0.0 <= result.anomaly_score <= 1.0
     # Metadata currently has null threshold; detector must not crash or fabricate invalid outputs.
     assert result.event_id == event.event_id
+
+
+def test_strict_selection_fails_for_unknown_model():
+    _clear_cache()
+    runtime = load_runtime_model(requested_model="model_does_not_exist", strict_selection=True)
+    assert runtime.available is False
+    assert "disabled or missing" in runtime.reason
+
+
+def test_detect_strict_replay_raises_when_selected_model_missing(monkeypatch):
+    _clear_cache()
+    monkeypatch.setenv("DTX_REPLAY_STRICT", "1")
+    event = EventIn(
+        asset_id="strict-asset",
+        zone_id="zone-S",
+        vibration=10.0,
+        temperature=45.0,
+        humidity=40.0,
+        pressure=1008.0,
+        metadata={"active_model": "missing_model", "replay_strict": True},
+    )
+    try:
+        detect(event)
+        assert False, "detect() should raise in strict replay mode for missing model"
+    except RuntimeError as exc:
+        assert "Strict replay mode enabled" in str(exc)
+    finally:
+        monkeypatch.delenv("DTX_REPLAY_STRICT", raising=False)

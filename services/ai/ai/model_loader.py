@@ -124,37 +124,45 @@ def _load_lstm_runtime_model(model_path: Path, metadata: dict[str, Any]) -> Any:
     return model
 
 
-def load_runtime_model(requested_model: str | None = None) -> RuntimeModel:
+def load_runtime_model(
+    requested_model: str | None = None,
+    strict_selection: bool = False,
+) -> RuntimeModel:
     """
     Load the active runtime model from registry artifacts with graceful fallback.
 
-    Selection precedence:
+        Selection precedence:
       1) explicit `requested_model` argument
       2) `DTX_ACTIVE_MODEL` environment override
       3) `active_model` in model_registry.json
 
-    If the selected model cannot be loaded, this function attempts other enabled
-    models in the registry order. When no enabled model is loadable, it returns
-    an unavailable RuntimeModel instead of raising, allowing detector fallback.
+    If strict_selection is False and the selected model cannot be loaded,
+    this function attempts other enabled models in registry order.
+    When strict_selection is True, only the selected model is attempted.
+    When no model is loadable, this returns an unavailable RuntimeModel.
     """
     registry = load_registry()
     models_cfg: dict[str, Any] = registry.get("models", {})
     selected = requested_model or os.getenv("DTX_ACTIVE_MODEL") or registry.get("active_model")
-    if requested_model is not None:
-        cache_key = requested_model
-    else:
-        cache_key = f"__selected__:{selected or 'none'}"
+    cache_key = f"{requested_model or selected or 'none'}::strict={int(strict_selection)}"
     if cache_key in _CACHE:
         return _CACHE[cache_key]
 
     scaler, feature_order = _load_shared_files(registry)
 
     # Selection precedence: requested arg > env override > registry active_model.
-    order = [selected] + [k for k in models_cfg.keys() if k != selected]
+    if strict_selection:
+        order = [selected]
+    else:
+        order = [selected] + [k for k in models_cfg.keys() if k != selected]
     selected_error = ""
     for model_key in order:
+        if not model_key:
+            continue
         cfg = models_cfg.get(model_key)
         if not cfg or not cfg.get("enabled", False):
+            if model_key == selected:
+                selected_error = f"Model '{model_key}' is disabled or missing in registry"
             continue
 
         family = str(cfg.get("family", model_key))
@@ -191,7 +199,7 @@ def load_runtime_model(requested_model: str | None = None) -> RuntimeModel:
         except Exception as exc:
             if model_key == selected:
                 selected_error = f"{type(exc).__name__}: {exc}"
-                continue
+            continue
 
     unavailable = _build_unavailable(
         model_key=str(selected or "unknown"),

@@ -11,9 +11,22 @@ from shared.schemas import (
     AssetStatus,
 )
 from api.database import insert_event
+from api.live_metrics import live_metrics
 from api.ws_manager import manager
 
 router = APIRouter()
+
+
+def _anomaly_type_to_label(anomaly_type: str) -> str:
+    mapping = {
+        "unknown": "no_fault",
+        "vibration": "bearing_fault",
+        "temperature": "overheating",
+        "combined": "combined",
+        "humidity": "combined",
+        "pressure": "combined",
+    }
+    return mapping.get(anomaly_type, "unknown")
 
 
 def _build_twin_update(event: EventIn, anomaly: AnomalyResult) -> TwinUpdate:
@@ -49,6 +62,31 @@ async def ingest_event(event: EventIn):
         ) from exc
 
     anomaly, explanation = await run_pipeline(event)
+
+    metadata = event.metadata if isinstance(event.metadata, dict) else {}
+    source = str(metadata.get("source", ""))
+    predicted_label = _anomaly_type_to_label(anomaly.anomaly_type.value)
+    metadata["predicted_label"] = predicted_label
+    metadata["predicted_anomaly_type"] = anomaly.anomaly_type.value
+    metadata["predicted_is_anomaly"] = bool(anomaly.is_anomaly)
+    metadata["predicted_score"] = float(anomaly.anomaly_score)
+
+    if source == "dataset_replay":
+        gt_name = str(
+            metadata.get("ground_truth_name")
+            or metadata.get("ground_truth_label")
+            or "unknown"
+        )
+        correct = gt_name == predicted_label
+        metadata["prediction_correct"] = correct
+        live_metrics.update(
+            ground_truth=gt_name,
+            predicted=predicted_label,
+            correct=correct,
+            model_key=str(metadata.get("runtime_model") or metadata.get("active_model") or "unknown"),
+        )
+
+    event.metadata = metadata
 
     alert = DashboardAlert(event=event, anomaly=anomaly, explanation=explanation)
 

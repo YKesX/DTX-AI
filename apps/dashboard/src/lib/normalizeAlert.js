@@ -55,6 +55,17 @@ function featuresFromDict(dict = {}) {
     .slice(0, 5);
 }
 
+function parseRawPayload(rawPayload) {
+  if (!rawPayload) return {};
+  if (typeof rawPayload === 'object') return rawPayload;
+  if (typeof rawPayload !== 'string') return {};
+  try {
+    return JSON.parse(rawPayload);
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Normalise a single raw alert payload from any known backend shape.
  * Returns null if the input is falsy.
@@ -67,6 +78,7 @@ export function normalizeAlert(raw) {
     const event = raw.event ?? {};
     const anomaly = raw.anomaly ?? {};
     const explanation = raw.explanation ?? {};
+    const metadata = event.metadata ?? {};
 
     const entityId = event.asset_id ?? '';
     return {
@@ -77,6 +89,15 @@ export function normalizeAlert(raw) {
       entity_id: entityId,
       entity: entityId,
       zone_id: event.zone_id ?? '',
+      source: metadata.source ?? null,
+      dataset: metadata.dataset ?? null,
+      active_model: metadata.runtime_model ?? metadata.active_model ?? null,
+      ground_truth_name: metadata.ground_truth_name ?? null,
+      predicted_label: metadata.predicted_label ?? null,
+      prediction_correct:
+        typeof metadata.prediction_correct === 'boolean'
+          ? metadata.prediction_correct
+          : null,
       anomaly_type: anomaly.anomaly_type ?? 'unknown',
       anomaly_score:
         typeof anomaly.anomaly_score === 'number' ? anomaly.anomaly_score : 0,
@@ -95,6 +116,8 @@ export function normalizeAlert(raw) {
   // ── Shape B: EventLog row (flat) or legacy mock (flat) ────────────────────
   const entityId =
     raw.asset_id ?? raw.entity_id ?? raw.entity ?? '';
+  const parsedPayload = parseRawPayload(raw.raw_payload);
+  const metadata = parsedPayload.metadata ?? {};
 
   return {
     id: raw.event_id ?? raw.alert_id ?? raw.id ?? crypto.randomUUID(),
@@ -104,6 +127,15 @@ export function normalizeAlert(raw) {
     entity_id: entityId,
     entity: entityId,
     zone_id: raw.zone_id ?? '',
+    source: metadata.source ?? null,
+    dataset: metadata.dataset ?? null,
+    active_model: metadata.runtime_model ?? metadata.active_model ?? null,
+    ground_truth_name: metadata.ground_truth_name ?? null,
+    predicted_label: metadata.predicted_label ?? null,
+    prediction_correct:
+      typeof metadata.prediction_correct === 'boolean'
+        ? metadata.prediction_correct
+        : null,
     anomaly_type: raw.anomaly_type ?? 'unknown',
     anomaly_score:
       typeof raw.anomaly_score === 'number' ? raw.anomaly_score : 0,

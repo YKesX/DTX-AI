@@ -27,9 +27,13 @@ function StatCard({ icon: Icon, label, value, pulse }) {
   );
 }
 
-export default function StatusCards({ activeAlerts, connectedSensors, lastDataTime, systemStatus }) {
+export default function StatusCards({ activeAlerts, connectedSensors, lastDataTime, systemStatus, replayMetrics }) {
+  const replayTotal = replayMetrics?.total_replayed ?? 0;
+  const replayCorrect = replayMetrics?.total_correct ?? 0;
+  const replayAccuracy = replayMetrics?.running_accuracy ?? 0;
+
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
       <StatCard
         icon={Bell}
         label="Aktif Uyarı"
@@ -50,6 +54,16 @@ export default function StatusCards({ activeAlerts, connectedSensors, lastDataTi
         icon={Activity}
         label="Sistem Durumu"
         value={systemStatus}
+      />
+      <StatCard
+        icon={Activity}
+        label="Replay Doğru"
+        value={`${replayCorrect}/${replayTotal}`}
+      />
+      <StatCard
+        icon={Activity}
+        label="Replay Accuracy"
+        value={`${(replayAccuracy * 100).toFixed(1)}%`}
       />
     </div>
   );

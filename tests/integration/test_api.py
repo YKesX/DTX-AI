@@ -15,6 +15,7 @@ try:
     from httpx import AsyncClient, ASGITransport
     from main import app
     from api.database import init_db
+    from api.live_metrics import live_metrics
     _HTTPX_AVAILABLE = True
 except ImportError:
     _HTTPX_AVAILABLE = False
@@ -30,6 +31,7 @@ pytestmark = pytest.mark.skipif(
 async def setup_db():
     """Initialise the SQLite DB before each test (mirrors the lifespan)."""
     await init_db()
+    live_metrics.reset()
 
 
 @pytest.mark.asyncio
@@ -57,6 +59,41 @@ async def test_post_event_returns_alert():
     assert "anomaly" in data
     assert "explanation" in data
     assert data["anomaly"]["is_anomaly"] is True
+
+
+@pytest.mark.asyncio
+async def test_post_event_dataset_replay_metadata_and_metrics():
+    payload = {
+        "asset_id": "replay-machine-01",
+        "zone_id": "zone-R",
+        "vibration": 16.0,
+        "temperature": 85.0,
+        "humidity": 35.0,
+        "pressure": 1015.0,
+        "metadata": {
+            "source": "dataset_replay",
+            "dataset": "ziya",
+            "split": "test",
+            "row_id": 99,
+            "ground_truth_label": "1",
+            "ground_truth_name": "bearing_fault",
+            "active_model": "random_forest",
+            "replay_strict": False,
+        },
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/events/", json=payload)
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["event"]["metadata"]["source"] == "dataset_replay"
+        assert "predicted_label" in body["event"]["metadata"]
+        assert "prediction_correct" in body["event"]["metadata"]
+
+        metrics_resp = await client.get("/metrics/live")
+        assert metrics_resp.status_code == 200
+        metrics = metrics_resp.json()
+        assert metrics["total_replayed"] >= 1
+        assert "running_accuracy" in metrics
 
 
 @pytest.mark.asyncio

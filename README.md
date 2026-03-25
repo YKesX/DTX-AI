@@ -1,145 +1,129 @@
 # DTX-AI — Smart Warehouse Anomaly Detection + Explainable AI
 
-DTX-AI is a university capstone project focused on smart warehouse monitoring with anomaly detection, explainable AI (XAI), a live backend API, and a live web dashboard.
+DTX-AI is a university capstone project for intelligent warehouse monitoring and decision support.
 
 ## Whole project scope
 
-- smart warehouse anomaly detection
-- explainable AI
-- live backend API
-- live web dashboard
-- reproducible demo scenario generation
-- **later** digital twin integration with NVIDIA Isaac Sim
-- **later** hardware integration with ESP32 (or similar real sensor streams)
+DTX-AI is a full-stack AI system, not only a dashboard or notebook:
 
-## Current project stage
+- anomaly detection on warehouse/equipment telemetry
+- explainable AI (XAI) for operator-facing justification
+- FastAPI backend for ingestion, inference, persistence, broadcast
+- live dashboard for operators
+- synthetic scenario generation
+- later digital twin integration with NVIDIA Isaac Sim
+- later hardware/sensor integration (ESP32 or equivalent)
 
-The current stage is the **software demo core**, not the final full system.
+## Current project stage (truthful scope)
 
-Current end-to-end path intentionally excludes Isaac Sim and focuses on:
+Current critical path is the software demo path **without Isaac Sim**:
 
-1. environment setup
-2. backend startup
-3. dashboard startup
-4. scenario generation / event seeding
-5. API ingestion
-6. runtime inference with active model selection
-7. explanation generation
-8. API persistence + websocket broadcast
-9. dashboard rendering (score, severity, explanation, top features)
+- real API ingestion (`POST /events/`)
+- runtime model inference (active model selection)
+- explanation generation
+- websocket broadcast + dashboard rendering
+- synthetic demo mode **and** dataset replay validation mode
+
+The dataset replay mode is used to prove that trained models are driving outputs by showing ground truth vs prediction and live running metrics.
 
 ## Current architecture flow
 
 ```
-[scenario generator / seeded events]
-             │
-             ▼
-        POST /events/
-        (FastAPI backend)
-             │
-             ▼
-    services/ai runtime pipeline
-    - detector (model registry + fallback)
-    - explainer (tree XAI + fallback)
-             │
-             ├── SQLite persistence
-             └── WS broadcast (/ws/events)
-                          │
-                          ▼
-                    React dashboard
+[synthetic generator OR dataset replay]
+              │
+              ▼
+         POST /events/
+       (FastAPI apps/api)
+              │
+              ▼
+     services/ai runtime pipeline
+     - detector (real model path)
+     - explainer (SHAP/feature-importance path)
+              │
+              ├── SQLite persistence (events)
+              ├── WebSocket broadcast (/ws/events)
+              └── live in-memory replay metrics (/metrics/live)
+                        │
+                        ▼
+                   React dashboard
 ```
 
-## Current runtime model support
+## Runtime model support
 
-Runtime artifacts are under `services/ai/ai/models/` and selected by:
+Artifacts: [services/ai/ai/models](services/ai/ai/models)
 
-- `services/ai/ai/models/shared/model_registry.json` (`active_model`)
-- optional runtime override: `DTX_ACTIVE_MODEL=<model_key>`
+- `lightgbm`
+- `random_forest`
+- `xgboost`
+- `lstm_ae`
 
-Supported families:
+Selection precedence:
 
-- LightGBM (`lightgbm`)
-- RandomForest (`random_forest`)
-- XGBoost (`xgboost`)
-- LSTM-AE (`lstm_ae`)
+1. event metadata `active_model` (replay mode)
+2. `DTX_ACTIVE_MODEL`
+3. registry `active_model` in [services/ai/ai/models/shared/model_registry.json](services/ai/ai/models/shared/model_registry.json)
 
-Behavior notes:
+### Strict replay mode
 
-- tree models use shared scaler + canonical feature order and produce explanation payloads compatible with API/dashboard normalization
-- tree XAI uses `services/ai/xai_explainer.py` when possible, with graceful fallback if unavailable
-- LSTM-AE loading is explicit; threshold is used only when defined in metadata
-- if selected model is incomplete/unloadable, runtime falls back cleanly so demo flow remains usable
+Strict replay can be enabled per replay run (`--strict`) or via `DTX_REPLAY_STRICT=1`.
 
-## Quick start (current demo path)
+In strict replay mode:
 
-### 1) Setup
+- selected model must load successfully
+- no silent fallback to stub detector
+- tree explanation failure is explicit and degrades to model `feature_importances_`
+- LSTM-AE is rejected in strict mode when `default_threshold` is missing
+
+## Demo modes
+
+### A) Synthetic scenario demo
 
 ```bash
-cd DTX-AI
+bash scripts/run_demo.sh --mode synthetic --scenario mixed --count 10 --delay 0.8
+```
+
+### B) Dataset replay validation demo (held-out chronological rows)
+
+```bash
+bash scripts/run_demo.sh --mode replay --model random_forest --split test --count 100 --delay 0.5 --strict-replay
+```
+
+Direct replay command:
+
+```bash
+python scripts/replay_dataset_demo.py --model random_forest --split test --limit 100 --delay 0.5 --source ziya --strict
+```
+
+Replay events include provenance in `event.metadata`:
+
+- `source=dataset_replay`
+- `dataset`, `row_id`, `split`, `replay_index`
+- `ground_truth_label`, `ground_truth_name`
+- `active_model`, `runtime_model`
+- `predicted_label`, `prediction_correct`
+
+## Setup and run
+
+```bash
 bash scripts/setup.sh
+bash scripts/run_dev.sh
 ```
 
-### 2) Run one-command demo
-
-```bash
-bash scripts/run_demo.sh --scenario mixed --count 10 --delay 0.8
-```
-
-Example options:
-
-```bash
-bash scripts/run_demo.sh --setup --model lightgbm --scenario combined --count 12 --delay 0.6
-bash scripts/run_demo.sh --model random_forest --scenario gradual_drift
-bash scripts/run_demo.sh --no-seed
-```
-
-### 3) URLs
+URLs:
 
 - API docs: http://localhost:8000/docs
 - Dashboard: http://localhost:5173
+- Live replay metrics: http://localhost:8000/metrics/live
 
-## Supported demo scenarios
+## Current limitations
 
-- `normal`
-- `bearing_fault`
-- `overheating`
-- `combined`
-- `mixed`
-- `gradual_drift`
-- `intermittent_spike`
+- Isaac Sim intentionally excluded from this current validation path
+- notebook training files are separate from runtime integration and were not modified
+- LSTM-AE strict replay requires a configured numeric threshold (`default_threshold`)
+- saved model metrics come from different historical split setups and should not be oversold as directly comparable
 
-You can run scenario generation directly:
+## Documentation
 
-```bash
-python scripts/seed_demo_events.py --scenario mixed --count 10 --delay 0.8
-```
-
-## Model artifacts and registry files
-
-Shared:
-
-- `services/ai/ai/models/shared/model_registry.json`
-- `services/ai/ai/models/shared/feature_order.json`
-- `services/ai/ai/models/shared/scaler.pkl`
-
-Per model family:
-
-- `services/ai/ai/models/lightgbm/`
-- `services/ai/ai/models/random_forest/`
-- `services/ai/ai/models/xgboost/`
-- `services/ai/ai/models/lstm_ae/`
-
-Metadata files define model family assumptions, class mapping, and runtime notes.
-
-## Current limitations (important)
-
-- Isaac Sim is excluded from this current software demo path
-- training notebooks are separate and not part of runtime integration
-- LSTM-AE may require explicit threshold configuration (`default_threshold`) before full anomaly-threshold behavior is active
-- model metrics come from different data splits across artifacts; avoid overselling direct comparability
-
-## Additional docs
-
-- API contract: `docs/api_contract.md`
-- Architecture: `docs/architecture.md`
-- Current usage details: `docs/current_usage.md`
+- API contract: [docs/api_contract.md](docs/api_contract.md)
+- Architecture: [docs/architecture.md](docs/architecture.md)
+- Current usage guide: [docs/current_usage.md](docs/current_usage.md)

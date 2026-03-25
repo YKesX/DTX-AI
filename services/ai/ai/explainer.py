@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from shared.schemas import AnomalyResult, ExplanationResult, EventIn
 from ai.model_loader import load_runtime_model
 
@@ -77,7 +79,15 @@ def _fallback_explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResu
 
 
 def explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
-    runtime = load_runtime_model()
+    strict_replay = bool(
+        os.getenv("DTX_REPLAY_STRICT", "0") == "1"
+        or (event.metadata or {}).get("replay_strict") is True
+    )
+    requested_model = (event.metadata or {}).get("active_model") or os.getenv("DTX_ACTIVE_MODEL")
+    runtime = load_runtime_model(
+        requested_model=str(requested_model) if requested_model else None,
+        strict_selection=strict_replay,
+    )
     if runtime.available and runtime.supports_tree_xai and runtime.model is not None:
         try:
             # services/ is on PYTHONPATH in dev/test/CI, so import via ai namespace.
@@ -137,6 +147,30 @@ def explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
                 ),
             )
         except Exception:
+            if strict_replay and hasattr(runtime.model, "feature_importances_"):
+                names = runtime.feature_order or []
+                importances = list(getattr(runtime.model, "feature_importances_", []))
+                pairs = [
+                    (names[i], float(importances[i]))
+                    for i in range(min(len(names), len(importances)))
+                ]
+                pairs = sorted(pairs, key=lambda item: item[1], reverse=True)[:5]
+                total = sum(v for _, v in pairs) or 1.0
+                normalized = {k: round(v / total, 4) for k, v in pairs}
+                return ExplanationResult(
+                    event_id=event.event_id,
+                    summary=(
+                        "Strict replay explanation degraded to model feature_importances_ "
+                        "because SHAP generation failed."
+                    ),
+                    contributing_features=normalized,
+                    recommendation=_RECOMMENDATIONS.get(
+                        anomaly.anomaly_type.value,
+                        _RECOMMENDATIONS["unknown"],
+                    ),
+                )
+            if strict_replay:
+                raise
             return _fallback_explain(event, anomaly)
 
     if runtime.available and runtime.family == "lstm_autoencoder_pytorch":
