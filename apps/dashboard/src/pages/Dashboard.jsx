@@ -42,7 +42,7 @@ function deriveStatus(events) {
   });
 
   const hasCritical = events.some((e) => e.severity === 'critical');
-  const hasWarning  = events.some((e) => e.severity === 'warning' || e.severity === 'high');
+  const hasWarning = events.some((e) => e.severity === 'warning' || e.severity === 'high');
   const systemStatus = hasCritical ? 'Kritik' : hasWarning ? 'Uyarı' : 'Çevrimiçi';
 
   return { activeAlerts, connectedSensors, lastDataTime, systemStatus };
