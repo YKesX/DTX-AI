@@ -5,7 +5,7 @@ This guide covers the **current demoable software stack** (no Isaac Sim required
 ## 1) Setup
 
 ```bash
-cd /home/runner/work/DTX-AI/DTX-AI
+cd DTX-AI
 bash scripts/setup.sh
 ```
 

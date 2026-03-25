@@ -29,6 +29,7 @@ class RuntimeModel:
 
 
 _CACHE: dict[str, RuntimeModel] = {}
+DEFAULT_FEATURE_COUNT = 9
 
 
 def _read_json(path: Path) -> dict[str, Any] | list[Any]:
@@ -96,7 +97,7 @@ def _load_lstm_runtime_model(model_path: Path, metadata: dict[str, Any]) -> Any:
     except Exception as exc:  # pragma: no cover - dependency optional
         raise RuntimeError(f"PyTorch unavailable: {exc}") from exc
 
-    feature_dim = int(metadata.get("feature_count", 9))
+    feature_dim = int(metadata.get("feature_count", DEFAULT_FEATURE_COUNT))
     params = metadata.get("best_params", {})
     hidden = int(params.get("hidden", 64))
     latent = int(params.get("latent", 8))
@@ -124,6 +125,18 @@ def _load_lstm_runtime_model(model_path: Path, metadata: dict[str, Any]) -> Any:
 
 
 def load_runtime_model(requested_model: str | None = None) -> RuntimeModel:
+    """
+    Load the active runtime model from registry artifacts with graceful fallback.
+
+    Selection precedence:
+      1) explicit `requested_model` argument
+      2) `DTX_ACTIVE_MODEL` environment override
+      3) `active_model` in model_registry.json
+
+    If the selected model cannot be loaded, this function attempts other enabled
+    models in the registry order. When no enabled model is loadable, it returns
+    an unavailable RuntimeModel instead of raising, allowing detector fallback.
+    """
     cache_key = requested_model or "__registry_active__"
     if cache_key in _CACHE:
         return _CACHE[cache_key]
@@ -133,7 +146,9 @@ def load_runtime_model(requested_model: str | None = None) -> RuntimeModel:
     scaler, feature_order = _load_shared_files(registry)
     selected = requested_model or os.getenv("DTX_ACTIVE_MODEL") or registry.get("active_model")
 
+    # Selection precedence: requested arg > env override > registry active_model.
     order = [selected] + [k for k in models_cfg.keys() if k != selected]
+    selected_error = ""
     for model_key in order:
         cfg = models_cfg.get(model_key)
         if not cfg or not cfg.get("enabled", False):
@@ -172,12 +187,16 @@ def load_runtime_model(requested_model: str | None = None) -> RuntimeModel:
             return runtime
         except Exception as exc:
             if model_key == selected:
+                selected_error = f"{type(exc).__name__}: {exc}"
                 continue
 
     unavailable = _build_unavailable(
         model_key=str(selected or "unknown"),
         family="unknown",
-        reason="No enabled model could be loaded from registry artifacts",
+        reason=(
+            f"No enabled model could be loaded from registry artifacts. "
+            f"selected_error={selected_error or 'n/a'}"
+        ),
         feature_order=feature_order,
     )
     _CACHE[cache_key] = unavailable

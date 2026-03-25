@@ -75,7 +75,7 @@ Behavior notes:
 ### 1) Setup
 
 ```bash
-cd /home/runner/work/DTX-AI/DTX-AI
+cd DTX-AI
 bash scripts/setup.sh
 ```
 

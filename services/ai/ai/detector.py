@@ -20,6 +20,7 @@ _THRESHOLDS = {
 _ANOMALY_THRESHOLD = float(os.getenv("ANOMALY_THRESHOLD", "0.5"))
 _WINDOW_BUFFER: dict[str, deque] = {}
 _WINDOW_SIZE = 5
+DEFAULT_FEATURE_COUNT = 9
 
 _CLASS_MAP = {
     0: (AnomalyType.UNKNOWN, Severity.INFO),
@@ -77,7 +78,7 @@ def _build_window_features(event: EventIn, feature_order: list[str]) -> list[flo
         temp_mean,
         temp_last - temp_values[0],
         pressure_mean,
-    ][: len(feature_order) or 9]
+    ][: len(feature_order) or DEFAULT_FEATURE_COUNT]
 
 
 def _run_tree_model(event: EventIn, runtime: RuntimeModel) -> AnomalyResult:
@@ -234,7 +235,7 @@ def detect(event: EventIn) -> AnomalyResult:
     if os.getenv("DTX_FORCE_STUB", "0") == "1":
         return _rule_based_detect(event)
 
-    if all(value is None for value in (event.vibration, event.temperature, event.humidity, event.pressure)):
+    if all(value is None for value in (event.vibration, event.temperature, event.pressure)):
         return _rule_based_detect(event)
 
     fallback = _rule_based_detect(event)
