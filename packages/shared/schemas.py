@@ -180,3 +180,23 @@ class EventLog(BaseModel):
     severity: Severity
     summary: str
     raw_payload: dict[str, Any] = Field(default_factory=dict)
+
+    # ---------------------------------------------------------------------------
+# Entity position update (DT-02 Entity Playback)
+# ---------------------------------------------------------------------------
+
+class PositionUpdate(BaseModel):
+    """
+    Real-time or playback position for a warehouse entity (forklift, worker).
+    Sent to POST /positions — adapter uses this to move objects in Isaac Sim.
+    """
+    entity_id: str = Field(..., description="e.g. 'forklift_01', 'worker_01'")
+    entity_type: str = Field(default="forklift", description="'forklift' or 'worker'")
+    x: float = Field(..., description="World X position (metres)")
+    y: float = Field(..., description="World Y position (metres)")
+    z: float = Field(default=0.0, description="World Z position (metres)")
+    heading: float = Field(default=0.0, description="Rotation in degrees (0 = north)")
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+    zone_id: str = Field(default="", description="Current zone, used for proximity checks")

@@ -39,6 +39,11 @@ coverage.xml
 *.usdz
 *.log
 isaac_sim_cache/
+.vs/
+*.vsidx
+*.db-shm
+*.db-wal
+slnx.sqlite
 
 # SQLite
 *.db

@@ -1,0 +1,102 @@
+[
+    {
+        "t": 0.0,
+        "entity_id": "forklift_01",
+        "entity_type": "forklift",
+        "x": 0.3,
+        "y": -0.2,
+        "z": 0.4,
+        "heading": 0,
+        "zone_id": "corridor"
+    },
+    {
+        "t": 1.5,
+        "entity_id": "forklift_01",
+        "entity_type": "forklift",
+        "x": 0.3,
+        "y": -2.0,
+        "z": 0.4,
+        "heading": 0,
+        "zone_id": "corridor"
+    },
+    {
+        "t": 3.0,
+        "entity_id": "forklift_01",
+        "entity_type": "forklift",
+        "x": 0.3,
+        "y": -4.0,
+        "z": 0.4,
+        "heading": 0,
+        "zone_id": "corridor"
+    },
+    {
+        "t": 4.5,
+        "entity_id": "forklift_01",
+        "entity_type": "forklift",
+        "x": 0.3,
+        "y": -6.0,
+        "z": 0.4,
+        "heading": 0,
+        "zone_id": "room1"
+    },
+    {
+        "t": 6.0,
+        "entity_id": "forklift_01",
+        "entity_type": "forklift",
+        "x": 0.3,
+        "y": -8.0,
+        "z": 0.4,
+        "heading": 0,
+        "zone_id": "danger_zone"
+    },
+    {
+        "t": 7.0,
+        "entity_id": "worker_01",
+        "entity_type": "worker",
+        "x": 1.0,
+        "y": -8.0,
+        "z": 0.4,
+        "heading": 180,
+        "zone_id": "danger_zone"
+    },
+    {
+        "t": 8.5,
+        "entity_id": "forklift_01",
+        "entity_type": "forklift",
+        "x": 0.3,
+        "y": -9.5,
+        "z": 0.4,
+        "heading": 0,
+        "zone_id": "room1"
+    },
+    {
+        "t": 10.0,
+        "entity_id": "forklift_01",
+        "entity_type": "forklift",
+        "x": 0.3,
+        "y": -6.0,
+        "z": 0.4,
+        "heading": 180,
+        "zone_id": "corridor"
+    },
+    {
+        "t": 11.5,
+        "entity_id": "forklift_01",
+        "entity_type": "forklift",
+        "x": 0.3,
+        "y": -2.0,
+        "z": 0.4,
+        "heading": 180,
+        "zone_id": "corridor"
+    },
+    {
+        "t": 13.0,
+        "entity_id": "forklift_01",
+        "entity_type": "forklift",
+        "x": 0.3,
+        "y": -0.2,
+        "z": 0.4,
+        "heading": 180,
+        "zone_id": "corridor"
+    }
+]
