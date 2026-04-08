@@ -4,16 +4,16 @@ import Badge from '../ui/Badge';
 export default function ReplayEventTable({ events = [] }) {
   return (
     <Card className="overflow-hidden">
-      <div className="border-b border-gray-700 px-5 py-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-200">
+      <div className="border-b border-white/10 px-5 py-4">
+        <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-gray-200">
           Recent Replay Events
         </h2>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-700 text-xs uppercase tracking-wider text-gray-500">
-              <th className="px-5 py-3 text-left">Zaman</th>
+            <tr className="border-b border-white/10 text-xs uppercase tracking-[0.18em] text-gray-500">
+              <th className="px-5 py-3 text-left">Time</th>
               <th className="px-5 py-3 text-left">Asset</th>
               <th className="px-5 py-3 text-left">Model</th>
               <th className="px-5 py-3 text-left">GT</th>
@@ -32,9 +32,9 @@ export default function ReplayEventTable({ events = [] }) {
               </tr>
             ) : (
               events.map((event) => (
-                <tr key={event.id} className="border-b border-gray-800/70">
+                <tr key={event.id} className="border-b border-white/5">
                   <td className="px-5 py-3 text-gray-400">
-                    {new Date(event.timestamp).toLocaleTimeString('tr-TR', {
+                    {new Date(event.timestamp).toLocaleTimeString('en-GB', {
                       hour: '2-digit',
                       minute: '2-digit',
                       second: '2-digit',

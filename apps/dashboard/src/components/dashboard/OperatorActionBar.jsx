@@ -41,7 +41,7 @@ export default function OperatorActionBar({
             onChange={(e) => setAssignee(e.target.value)}
             placeholder="Maintenance team / operator"
             disabled={disabled || loading}
-            className="w-full rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500"
+            className="control-input w-full rounded-xl px-3 py-2 text-sm"
           />
         </label>
 
@@ -53,7 +53,7 @@ export default function OperatorActionBar({
             onChange={(e) => setNote(e.target.value)}
             placeholder="Short operator note"
             disabled={disabled || loading}
-            className="w-full rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500"
+            className="control-input w-full rounded-xl px-3 py-2 text-sm"
           />
         </label>
       </div>
@@ -65,7 +65,15 @@ export default function OperatorActionBar({
             type="button"
             onClick={() => handleSubmit(action.key)}
             disabled={disabled || loading || (action.key === 'assign' && !assignee.trim())}
-            className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 transition-colors hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className={`rounded-xl border px-3 py-2 text-sm transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
+              action.key === 'assign'
+                ? 'border-emerald-300/35 bg-emerald-300/10 text-emerald-100 hover:bg-emerald-300/16'
+                : action.key === 'resolve'
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/16'
+                : action.key === 'escalate'
+                ? 'border-blue-400/32 bg-blue-400/10 text-blue-100 hover:bg-blue-400/16'
+                : 'border-[rgba(92,117,142,0.28)] bg-[rgba(17,24,32,0.84)] text-gray-100 hover:bg-[rgba(34,58,67,0.85)]'
+            }`}
           >
             {loading ? 'Saving...' : action.label}
           </button>

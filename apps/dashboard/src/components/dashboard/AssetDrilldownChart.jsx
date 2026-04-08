@@ -11,16 +11,16 @@ import {
 import Card from '../ui/Card';
 
 const METRICS = [
-  { key: 'vibration', label: 'Vibration', color: '#f97316' },
-  { key: 'temperature', label: 'Temperature', color: '#ef4444' },
-  { key: 'pressure', label: 'Pressure', color: '#38bdf8' },
-  { key: 'anomaly_score', label: 'Anomaly Score', color: '#3b82f6' },
+  { key: 'vibration', label: 'Vibration', color: '#8cf1de' },
+  { key: 'temperature', label: 'Temperature', color: '#ff8098' },
+  { key: 'pressure', label: 'Pressure', color: '#7fe1ff' },
+  { key: 'anomaly_score', label: 'Anomaly Score', color: '#8cb8ff' },
 ];
 
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-lg border border-gray-700 bg-gray-900/95 px-3 py-2 text-xs shadow-xl">
+    <div className="rounded-xl border border-[rgba(92,117,142,0.28)] bg-[rgba(12,18,25,0.96)] px-3 py-2 text-xs shadow-xl backdrop-blur-xl">
       <p className="mb-2 text-gray-400">{label}</p>
       {payload.map((item) => (
         <p key={item.dataKey} className="font-medium" style={{ color: item.color }}>
@@ -71,8 +71,8 @@ export default function AssetDrilldownChart({
               onClick={() => onMetricChange?.(metric.key)}
               className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                 metric.key === chartMetric.key
-                  ? 'border-blue-500 bg-blue-500/15 text-blue-300'
-                  : 'border-gray-700 bg-gray-800 text-gray-300 hover:bg-gray-700'
+                  ? 'border-emerald-300/40 bg-emerald-300/12 text-emerald-100'
+                  : 'border-[rgba(92,117,142,0.26)] bg-[rgba(16,24,33,0.84)] text-gray-300 hover:bg-[rgba(32,44,57,0.82)]'
               }`}
             >
               {metric.label}
@@ -92,18 +92,18 @@ export default function AssetDrilldownChart({
       ) : (
         <ResponsiveContainer width="100%" height={260}>
           <LineChart data={chartData} margin={{ top: 8, right: 12, left: -14, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-            <XAxis
-              dataKey="time"
-              tick={{ fill: '#9ca3af', fontSize: 11 }}
-              axisLine={{ stroke: '#374151' }}
-              tickLine={false}
-            />
-            <YAxis
-              tick={{ fill: '#9ca3af', fontSize: 11 }}
-              axisLine={{ stroke: '#374151' }}
-              tickLine={false}
-            />
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(111,127,144,0.22)" />
+          <XAxis
+            dataKey="time"
+            tick={{ fill: '#7f90a0', fontSize: 11 }}
+            axisLine={{ stroke: 'rgba(111,127,144,0.28)' }}
+            tickLine={false}
+          />
+          <YAxis
+            tick={{ fill: '#7f90a0', fontSize: 11 }}
+            axisLine={{ stroke: 'rgba(111,127,144,0.28)' }}
+            tickLine={false}
+          />
             <Tooltip content={<CustomTooltip />} />
             <Line
               type="monotone"
@@ -119,8 +119,8 @@ export default function AssetDrilldownChart({
               type="monotone"
               dataKey="anomaly_score"
               name="Anomaly Score"
-              stroke="#60a5fa"
-              strokeOpacity={chartMetric.key === 'anomaly_score' ? 0.25 : 0.55}
+              stroke="#8cb8ff"
+              strokeOpacity={chartMetric.key === 'anomaly_score' ? 0.22 : 0.48}
               strokeWidth={1.5}
               dot={false}
               connectNulls

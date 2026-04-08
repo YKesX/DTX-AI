@@ -10,14 +10,21 @@ const navItems = [
 
 export default function Sidebar() {
   return (
-    <aside className="fixed left-0 top-0 h-screen w-56 bg-gray-950 border-r border-gray-800 flex flex-col z-30">
-      {/* Brand */}
-      <div className="flex items-center gap-3 px-5 py-5 border-b border-gray-800">
-        <Warehouse className="w-7 h-7 text-blue-400 shrink-0" />
-        <span className="text-white font-bold text-lg tracking-tight">DTX-AI</span>
+    <aside className="fixed left-0 top-0 z-30 flex h-screen w-56 flex-col border-r border-white/10 bg-[rgba(10,15,21,0.9)] backdrop-blur-2xl">
+      <div className="border-b border-white/10 px-5 py-5">
+        <div className="mb-1 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/15 bg-white/8 shadow-[inset_0_1px_0_rgba(255,255,255,0.16)] backdrop-blur-xl">
+            <Warehouse className="h-6 w-6 shrink-0 text-[var(--accent-cyan)]" />
+          </div>
+          <div>
+            <span className="block text-lg font-bold tracking-tight text-white">DTX-AI</span>
+            <span className="text-[10px] uppercase tracking-[0.24em] text-gray-500">
+              Control Room
+            </span>
+          </div>
+        </div>
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-1">
         {navItems.map(({ to, label, icon: Icon }) => (
           <NavLink
@@ -25,10 +32,10 @@ export default function Sidebar() {
             to={to}
             end={to === '/'}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              `flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium transition-all ${
                 isActive
-                  ? 'bg-blue-600/20 text-blue-400 border border-blue-600/30'
-                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                  ? 'border border-[rgba(140,241,222,0.16)] bg-[rgba(255,255,255,0.06)] text-[rgba(229,255,248,0.96)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
+                  : 'text-gray-400 hover:border hover:border-white/10 hover:bg-white/6 hover:text-white'
               }`
             }
           >
@@ -38,9 +45,9 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Footer */}
-      <div className="px-5 py-4 border-t border-gray-800 text-xs text-gray-600">
-        v0.1.0 — Smart Warehouse
+      <div className="border-t border-white/10 px-5 py-4 text-xs text-gray-600">
+        <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500">DTX-AI Console</div>
+        <div className="mt-1 text-xs text-gray-600">v0.1.0 — Smart Warehouse</div>
       </div>
     </aside>
   );

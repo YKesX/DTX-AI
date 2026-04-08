@@ -20,7 +20,7 @@ function ReadingCard({ label, value, unit, threshold }) {
   const isAboveThreshold = numeric != null && numeric > threshold;
 
   return (
-    <div className="rounded-xl border border-gray-700 bg-gray-900/40 p-3">
+    <div className="control-panel-muted rounded-2xl p-3">
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs uppercase tracking-wider text-gray-500">{label}</span>
         <span className={`text-[11px] ${isAboveThreshold ? 'text-red-300' : 'text-gray-500'}`}>
@@ -28,7 +28,7 @@ function ReadingCard({ label, value, unit, threshold }) {
         </span>
       </div>
       <div className="mt-2 flex items-end justify-between gap-3">
-        <span className={`text-lg font-semibold ${isAboveThreshold ? 'text-red-300' : 'text-white'}`}>
+        <span className={`text-lg font-semibold ${isAboveThreshold ? 'text-red-200' : 'text-white'}`}>
           {formatMetric(value, unit)}
         </span>
         <span className={`text-xs ${isAboveThreshold ? 'text-red-400' : 'text-emerald-400'}`}>
@@ -48,9 +48,9 @@ function FeatureBar({ feature }) {
         <span className="text-gray-500">{feature.value}</span>
       </div>
       <div className="flex items-center gap-2">
-        <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-700">
+        <div className="h-2 flex-1 overflow-hidden rounded-full bg-[rgba(62,79,96,0.58)]">
           <div
-            className="h-full rounded-full bg-blue-500 transition-all"
+            className="h-full rounded-full bg-[linear-gradient(90deg,var(--accent-cyan),var(--accent-blue))] transition-all"
             style={{ width: `${pct}%` }}
           />
         </div>
@@ -70,7 +70,7 @@ function ActionHistory({ actions = [] }) {
       {actions.map((action) => (
         <div
           key={`${action.id}-${action.created_at}`}
-          className="rounded-lg border border-gray-700 bg-gray-900/40 px-3 py-2"
+          className="control-panel-muted rounded-xl px-3 py-2"
         >
           <div className="flex items-center justify-between gap-3">
             <span className="text-sm font-medium capitalize text-gray-100">
@@ -102,7 +102,7 @@ export default function ExplanationPanel({
   if (!event) {
     return (
       <Card className="flex h-full flex-col items-center justify-center gap-3 p-10 text-center">
-        <MousePointerClick className="h-10 w-10 text-gray-600" />
+        <MousePointerClick className="h-10 w-10 text-[rgba(140,241,222,0.72)]" />
         <p className="text-sm text-gray-500">Select an event</p>
         <p className="text-xs text-gray-600">
           Click an event row in the table to view details, explanation, and operator actions.
@@ -133,9 +133,9 @@ export default function ExplanationPanel({
       </div>
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-        <div className="rounded-xl border border-gray-700 bg-gray-900/40 p-4">
+        <div className="control-panel-muted rounded-2xl p-4">
           <div className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-200">
-            <ShieldAlert className="h-4 w-4 text-blue-400" />
+            <ShieldAlert className="h-4 w-4 text-[var(--accent-cyan)]" />
             Event Summary
           </div>
           <div className="space-y-2 text-sm text-gray-300">
@@ -151,9 +151,9 @@ export default function ExplanationPanel({
           </div>
         </div>
 
-        <div className="rounded-xl border border-gray-700 bg-gray-900/40 p-4">
+        <div className="control-panel-muted rounded-2xl p-4">
           <div className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-200">
-            <ClipboardList className="h-4 w-4 text-blue-400" />
+            <ClipboardList className="h-4 w-4 text-[var(--accent-blue)]" />
             Operator Status
           </div>
           <div className="space-y-2 text-sm text-gray-300">
@@ -195,7 +195,7 @@ export default function ExplanationPanel({
 
       <div className="space-y-2">
         <p className="text-xs uppercase tracking-wider text-gray-500">Explanation</p>
-        <div className="rounded-xl border border-gray-700 bg-gray-900/40 p-4">
+        <div className="control-panel-muted rounded-2xl p-4">
           <p className="text-sm leading-relaxed text-gray-300">
             {event.summary || event.explanation || '—'}
           </p>
@@ -204,12 +204,12 @@ export default function ExplanationPanel({
 
       <div className="space-y-2">
         <div className="flex items-center gap-2 text-sm font-medium text-gray-200">
-          <Wrench className="h-4 w-4 text-blue-400" />
+          <Wrench className="h-4 w-4 text-[var(--accent-cyan)]" />
           Operator Actions
         </div>
-        <div className="rounded-xl border border-gray-700 bg-gray-900/40 p-4">
+        <div className="control-panel-muted rounded-2xl p-4">
           <p className="mb-3 text-sm text-gray-400">
-            Recommendation: <span className="text-gray-200">{event.recommendation || 'No recommendation available.'}</span>
+            Recommendation: <span className="text-[rgba(215,255,246,0.96)]">{event.recommendation || 'No recommendation available.'}</span>
           </p>
           <p className="mb-3 text-xs text-gray-500">
             Assignee is only used when you click <span className="text-gray-300">Assign</span>.

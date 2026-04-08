@@ -80,7 +80,7 @@ export default function Validation() {
               modelCounts.map(([modelKey, count]) => (
                 <div
                   key={modelKey}
-                  className="flex items-center justify-between rounded-xl border border-gray-700 bg-gray-900/40 px-4 py-3"
+                  className="control-panel-muted flex items-center justify-between rounded-2xl px-4 py-3"
                 >
                   <span className="text-sm text-gray-300">{modelKey}</span>
                   <span className="text-lg font-semibold text-white">{count}</span>

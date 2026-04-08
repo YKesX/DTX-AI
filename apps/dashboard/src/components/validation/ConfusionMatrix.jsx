@@ -42,7 +42,7 @@ export default function ConfusionMatrix({ metrics }) {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[480px] text-sm">
             <thead>
-              <tr className="border-b border-gray-700 text-xs uppercase tracking-wider text-gray-500">
+              <tr className="border-b border-white/10 text-xs uppercase tracking-[0.18em] text-gray-500">
                 <th className="px-3 py-2 text-left">Actual \ Pred</th>
                 {labels.map((label) => (
                   <th key={label} className="px-3 py-2 text-left">{label}</th>
@@ -51,7 +51,7 @@ export default function ConfusionMatrix({ metrics }) {
             </thead>
             <tbody>
               {labels.map((actual, rowIndex) => (
-                <tr key={actual} className="border-b border-gray-800/70">
+                <tr key={actual} className="border-b border-white/5">
                   <td className="px-3 py-2 font-medium text-gray-200">{actual}</td>
                   {labels.map((predicted, colIndex) => {
                     const value = matrix[rowIndex][colIndex];

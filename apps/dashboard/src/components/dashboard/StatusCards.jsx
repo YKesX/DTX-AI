@@ -3,25 +3,30 @@ import Card from '../ui/Card';
 
 function StatCard({ icon: Icon, label, value, pulse }) {
   return (
-    <Card className="p-5 flex items-center gap-4">
+    <Card className="relative overflow-hidden p-5">
+      <div className={`absolute inset-x-6 top-0 h-px ${pulse ? 'bg-[linear-gradient(90deg,transparent,var(--accent-red),transparent)]' : 'bg-[linear-gradient(90deg,transparent,var(--accent-cyan),var(--accent-blue),transparent)]'}`} />
+      <div className="flex items-center gap-4">
       <div
-        className={`p-2.5 rounded-lg ${
-          pulse ? 'bg-red-900/40 animate-pulse' : 'bg-gray-700/60'
+        className={`rounded-xl border p-3 ${
+          pulse
+            ? 'border-white/12 bg-white/8'
+            : 'border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(140,241,222,0.04))]'
         }`}
       >
         <Icon
-          className={`w-5 h-5 ${pulse ? 'text-red-400' : 'text-blue-400'}`}
+          className={`h-5 w-5 ${pulse ? 'text-red-300' : 'text-[var(--accent-cyan)]'}`}
         />
       </div>
-      <div>
-        <p className="text-xs text-gray-500 uppercase tracking-wider">{label}</p>
+      <div className="min-w-0">
+        <p className="text-[11px] uppercase tracking-[0.22em] text-gray-500">{label}</p>
         <p
-          className={`text-xl font-bold mt-0.5 ${
-            pulse ? 'text-red-400' : 'text-white'
+          className={`mt-1 text-xl font-bold ${
+            pulse ? 'text-red-300' : 'text-white'
           }`}
         >
           {value}
         </p>
+      </div>
       </div>
     </Card>
   );

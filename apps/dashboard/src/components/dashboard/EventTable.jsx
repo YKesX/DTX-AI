@@ -15,7 +15,7 @@ function ScoreBar({ score }) {
 
   return (
     <div className="flex min-w-[80px] items-center gap-2">
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-700">
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[rgba(64,82,101,0.65)]">
         <div
           className={`h-full rounded-full ${color} transition-all`}
           style={{ width: `${pct}%` }}
@@ -138,9 +138,9 @@ export default function EventTable({ events = [], onSelectEvent, selectedId, onC
 
   return (
     <Card className="overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-gray-700 px-5 py-4">
+      <div className="flex items-center justify-between gap-3 border-b border-[rgba(113,136,158,0.18)] px-5 py-4">
         <div>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-200">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-100">
             Event Stream
           </h2>
           <p className="mt-1 text-xs text-gray-500">
@@ -148,13 +148,13 @@ export default function EventTable({ events = [], onSelectEvent, selectedId, onC
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-1">
+          <div className="rounded-xl border border-[rgba(92,117,142,0.28)] bg-[rgba(12,19,26,0.84)] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
             <button
               type="button"
               onClick={() => setViewMode('operator')}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 viewMode === 'operator'
-                  ? 'bg-blue-500/15 text-blue-300'
+                  ? 'bg-[linear-gradient(90deg,rgba(140,241,222,0.18),rgba(140,184,255,0.12))] text-[rgba(225,255,248,0.96)]'
                   : 'text-gray-400 hover:text-white'
               }`}
             >
@@ -165,7 +165,7 @@ export default function EventTable({ events = [], onSelectEvent, selectedId, onC
               onClick={() => setViewMode('developer')}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 viewMode === 'developer'
-                  ? 'bg-blue-500/15 text-blue-300'
+                  ? 'bg-[linear-gradient(90deg,rgba(140,241,222,0.18),rgba(140,184,255,0.12))] text-[rgba(225,255,248,0.96)]'
                   : 'text-gray-400 hover:text-white'
               }`}
             >
@@ -175,33 +175,33 @@ export default function EventTable({ events = [], onSelectEvent, selectedId, onC
           <button
             type="button"
             onClick={resetFilters}
-            className="rounded-md border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700/70"
+            className="rounded-md border border-[rgba(92,117,142,0.28)] bg-[rgba(17,24,32,0.84)] px-3 py-1.5 text-xs text-gray-300 hover:bg-[rgba(37,50,64,0.85)]"
           >
             Reset Filters
           </button>
           <button
             type="button"
             onClick={onClearLogs}
-            className="rounded-md border border-gray-600 px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-700/70"
+            className="rounded-md border border-[rgba(255,93,93,0.22)] bg-[rgba(44,18,20,0.72)] px-3 py-1.5 text-xs text-red-100 hover:bg-[rgba(64,23,27,0.82)]"
           >
             Clear Logs
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 border-b border-gray-700 px-5 py-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 border-b border-[rgba(113,136,158,0.18)] px-5 py-4 md:grid-cols-2 xl:grid-cols-4">
         <input
           type="text"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           placeholder="Search asset, model, prediction, or recommendation"
-          className="w-full rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500"
+          className="control-input w-full rounded-xl px-3 py-2 text-sm"
         />
 
         <select
           value={severityFilter}
           onChange={(e) => setSeverityFilter(e.target.value)}
-          className="w-full rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500"
+          className="control-input w-full rounded-xl px-3 py-2 text-sm"
         >
           <option value="all">All severities</option>
           {severityOptions.map((severity) => (
@@ -214,7 +214,7 @@ export default function EventTable({ events = [], onSelectEvent, selectedId, onC
         <select
           value={sourceFilter}
           onChange={(e) => setSourceFilter(e.target.value)}
-          className="w-full rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500"
+          className="control-input w-full rounded-xl px-3 py-2 text-sm"
         >
           <option value="all">All sources</option>
           {sourceOptions.map((source) => (
@@ -227,7 +227,7 @@ export default function EventTable({ events = [], onSelectEvent, selectedId, onC
         <select
           value={operatorFilter}
           onChange={(e) => setOperatorFilter(e.target.value)}
-          className="w-full rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500"
+          className="control-input w-full rounded-xl px-3 py-2 text-sm"
         >
           <option value="all">All operator states</option>
           {operatorOptions.map((status) => (
@@ -241,9 +241,9 @@ export default function EventTable({ events = [], onSelectEvent, selectedId, onC
       <div className="max-h-[620px] overflow-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-700 text-xs uppercase tracking-wider text-gray-500">
+            <tr className="border-b border-[rgba(113,136,158,0.18)] text-xs uppercase tracking-[0.18em] text-gray-500">
               {columns.map((column) => (
-                <th key={column.key} className="sticky top-0 bg-gray-800 px-5 py-3 text-left">
+                <th key={column.key} className="sticky top-0 bg-[rgba(21,30,40,0.98)] px-5 py-3 text-left backdrop-blur-xl">
                   {column.label}
                 </th>
               ))}
@@ -273,10 +273,10 @@ export default function EventTable({ events = [], onSelectEvent, selectedId, onC
                   <tr
                     key={rowId}
                     onClick={() => onSelectEvent(evt)}
-                    className={`cursor-pointer border-b border-gray-700/50 transition-colors ${
+                    className={`cursor-pointer border-b border-[rgba(113,136,158,0.12)] transition-colors ${
                       isSelected
-                        ? 'border-blue-700/40 bg-blue-900/20'
-                        : 'hover:bg-gray-700/30'
+                        ? 'border-emerald-300/30 bg-[linear-gradient(90deg,rgba(140,241,222,0.12),rgba(140,184,255,0.12))]'
+                        : 'hover:bg-[rgba(28,39,51,0.72)]'
                     }`}
                   >
                     {columns.map((column) => (

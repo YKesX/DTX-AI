@@ -38,22 +38,22 @@ export default function ClassDistributionCharts({ metrics }) {
       ) : (
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(111,127,144,0.22)" />
             <XAxis
               dataKey="label"
-              tick={{ fill: '#9ca3af', fontSize: 11 }}
-              axisLine={{ stroke: '#374151' }}
+              tick={{ fill: '#7f90a0', fontSize: 11 }}
+              axisLine={{ stroke: 'rgba(111,127,144,0.28)' }}
               tickLine={false}
             />
             <YAxis
-              tick={{ fill: '#9ca3af', fontSize: 11 }}
-              axisLine={{ stroke: '#374151' }}
+              tick={{ fill: '#7f90a0', fontSize: 11 }}
+              axisLine={{ stroke: 'rgba(111,127,144,0.28)' }}
               tickLine={false}
             />
             <Tooltip />
             <Legend />
-            <Bar dataKey="groundTruth" fill="#38bdf8" name="Ground Truth" radius={[6, 6, 0, 0]} />
-            <Bar dataKey="predicted" fill="#818cf8" name="Predicted" radius={[6, 6, 0, 0]} />
+            <Bar dataKey="groundTruth" fill="#8cf1de" name="Ground Truth" radius={[10, 10, 0, 0]} />
+            <Bar dataKey="predicted" fill="#8cb8ff" name="Predicted" radius={[10, 10, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       )}
