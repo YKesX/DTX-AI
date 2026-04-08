@@ -10,12 +10,12 @@ const severityClasses = {
 };
 
 const severityLabels = {
-  info:     'Bilgi',
-  warning:  'Uyarı',
-  critical: 'Kritik',
-  low:      'Düşük',
-  medium:   'Orta',
-  high:     'Yüksek',
+  info:     'Info',
+  warning:  'Warning',
+  critical: 'Critical',
+  low:      'Low',
+  medium:   'Medium',
+  high:     'High',
 };
 
 export default function Badge({ severity }) {

@@ -27,11 +27,11 @@ export default function TrendChart({ data = [] }) {
     <Card className="p-5">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-sm font-semibold text-gray-200 uppercase tracking-wide">
-          Anomali Skoru Trendi (Son 10 dk)
+          Anomaly Score Trend (Last 10 min)
         </h2>
         <div className="flex items-center gap-2 text-xs text-gray-500">
           <span className="inline-block w-3 h-0.5 bg-red-500 opacity-70" />
-          <span>Tehlike Eşiği (0.70)</span>
+          <span>Risk Threshold (0.70)</span>
         </div>
       </div>
 

@@ -36,28 +36,28 @@ export default function StatusCards({ activeAlerts, connectedSensors, lastDataTi
     <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
       <StatCard
         icon={Bell}
-        label="Aktif Uyarı"
+        label="Active Alerts"
         value={activeAlerts}
         pulse={activeAlerts > 0}
       />
       <StatCard
         icon={Wifi}
-        label="Bağlı Sensör"
+        label="Connected Sensors"
         value={connectedSensors}
       />
       <StatCard
         icon={Clock}
-        label="Son Veri"
+        label="Last Data"
         value={lastDataTime}
       />
       <StatCard
         icon={Activity}
-        label="Sistem Durumu"
+        label="System Status"
         value={systemStatus}
       />
       <StatCard
         icon={Activity}
-        label="Replay Doğru"
+        label="Replay Correct"
         value={`${replayCorrect}/${replayTotal}`}
       />
       <StatCard

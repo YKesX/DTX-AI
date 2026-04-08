@@ -116,6 +116,7 @@ async def ingest_event(event: EventIn):
     metadata["predicted_anomaly_type"] = anomaly.anomaly_type.value
     metadata["predicted_is_anomaly"] = bool(anomaly.is_anomaly)
     metadata["predicted_score"] = float(anomaly.anomaly_score)
+    metadata["recommendation"] = explanation.recommendation
 
     if source == "dataset_replay":
         gt_raw = str(

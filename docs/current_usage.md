@@ -37,6 +37,11 @@ bash scripts/run_dev.sh
 - Dashboard: http://localhost:5173
 - Live metrics: http://localhost:8000/metrics/live
 
+Dashboard pages:
+
+- `/` — operations dashboard with live event flow, explanation panel, operator actions, and asset drilldown chart
+- `/validation` — replay validation page with summary cards, class distributions, confusion matrix, and recent replay rows
+
 ## 4) Synthetic demo mode
 
 One-command path:
@@ -108,9 +113,39 @@ In replay mode, table/panel now show:
 - predicted label
 - correctness (`prediction_correct`)
 - anomaly score and explanation/top features
+- operator workflow state (`new`, `acknowledged`, `assigned`, `escalated`, `resolved`)
 - running replay accuracy cards from `/metrics/live`
 
-## 9) Later stages (not current path)
+## 9) Operator workflow
+
+The operations dashboard now supports per-alert operator actions:
+
+- acknowledge
+- assign
+- escalate
+- resolve
+
+Backend endpoints:
+
+- `POST /alerts/{event_id}/actions`
+- `GET /alerts/{event_id}/actions`
+
+The selected-event panel uses these endpoints to show current operator status, assignee, and action history.
+
+## 10) Asset drilldown
+
+Selecting an event now triggers an asset-specific history fetch:
+
+- `GET /assets/{asset_id}/timeline?limit=50`
+
+This powers the drilldown chart for:
+
+- vibration
+- temperature
+- pressure
+- anomaly score
+
+## 11) Later stages (not current path)
 
 - Isaac Sim live integration
 - hardware sensor ingestion

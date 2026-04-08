@@ -1,10 +1,11 @@
 import { NavLink } from 'react-router-dom';
-import { Warehouse, LayoutDashboard, ListChecks, Settings } from 'lucide-react';
+import { Warehouse, LayoutDashboard, ListChecks, Settings, FlaskConical } from 'lucide-react';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/events', label: 'Olaylar', icon: ListChecks },
-  { to: '/settings', label: 'Ayarlar', icon: Settings },
+  { to: '/validation', label: 'AI Validation', icon: FlaskConical },
+  { to: '/events', label: 'Events', icon: ListChecks },
+  { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
 export default function Sidebar() {
