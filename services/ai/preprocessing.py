@@ -17,7 +17,7 @@ import os
 import threading
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-
+from imblearn.over_sampling import SMOTE
 
 _scaler_cache: dict = {}
 _scaler_cache_lock = threading.Lock()
@@ -152,12 +152,70 @@ def preprocess_single(raw_input: dict, scaler_path='scaler.pkl', window_buffer: 
 
     return X_scaled
 
+def augment_with_smote(df, random_state=42):
+    """
+    Applies SMOTE only to raw sensor features to balance minority classes.
+    Rolling features are recalculated after augmentation to ensure consistency.
+    
+    Steps:
+        1. SMOTE on raw features only (Vibration, Temperature, Pressure)
+        2. Assign new timestamps to synthetic rows
+        3. Return augmented DataFrame without rolling features
+           (engineer_features() must be called after this function)
+    """
+    
+    raw_features = ['Vibration (mm/s)', 'Temperature (°C)', 'Pressure (bar)']
+
+    X = df[raw_features]
+    y = df['Fault Label']
+
+    print(f"Before SMOTE:\n{y.value_counts()}")
+
+    # Apply SMOTE — balances minority classes to match majority
+    sm = SMOTE(random_state=random_state)
+    X_res, y_res = sm.fit_resample(X, y)
+
+    print(f"\nAfter SMOTE:\n{pd.Series(y_res).value_counts()}")
+
+    # Build new DataFrame with raw features and label
+    df_res = pd.DataFrame(X_res, columns=raw_features)
+    df_res['Fault Label'] = y_res
+
+    # Assign timestamps safely
+    n_total     = len(df_res)
+    n_original  = len(df)
+    n_synthetic = n_total - n_original
+
+    last_ts      = df['Timestamp'].max()
+    synthetic_ts = pd.date_range(
+        start=last_ts + pd.Timedelta(minutes=1),
+        periods=n_synthetic,
+        freq='1min'
+    )
+
+    all_ts = pd.concat(
+        [df['Timestamp'].reset_index(drop=True), pd.Series(synthetic_ts)],
+        ignore_index=True
+    )
+    df_res['Timestamp'] = all_ts
+
+    # Sort by timestamp so rolling window is chronologically correct
+    df_res = df_res.sort_values('Timestamp').reset_index(drop=True)
+
+    print(f"\nAugmentation complete.")
+    print(f"  Before : {len(df)} rows")
+    print(f"  After  : {len(df_res)} rows")
+
+    return df_res
 
 def run_preprocessing():
     """Runs full preprocessing pipeline and saves all outputs."""
 
     print("Loading data...")
     df = load_data()
+
+    print("Augmenting with SMOTE...")
+    df = augment_with_smote(df)
 
     print("Engineering features...")
     df = engineer_features(df)
