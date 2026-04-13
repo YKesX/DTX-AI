@@ -22,6 +22,8 @@ Current critical path is the software demo path **without Isaac Sim**:
 - runtime model inference (active model selection)
 - explanation generation
 - websocket broadcast + dashboard rendering
+- operator workflow actions (acknowledge / assign / escalate / resolve)
+- asset drilldown history for selected warehouse assets
 - synthetic demo mode **and** dataset replay validation mode
 
 The dataset replay mode is used to prove that trained models are driving outputs by showing ground truth vs prediction and live running metrics.
@@ -123,6 +125,8 @@ URLs:
 Dashboard convenience:
 
 - The event table includes a **Clear Logs** button that clears dashboard rows, deletes persisted API event logs, and resets live replay metrics for fresh percentage tracking.
+- The operations dashboard includes an asset drilldown chart and operator-action panel for the selected alert.
+- The `/validation` page surfaces replay metrics, class distributions, confusion matrix, and recent replay rows for model-review demos.
 
 ## Current limitations
 

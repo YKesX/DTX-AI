@@ -1,3 +1,115 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --bg-base: #0a1218;
+  --bg-deep: #0e171f;
+  --bg-panel-top: rgba(18, 27, 35, 0.88);
+  --bg-panel-bottom: rgba(12, 19, 26, 0.84);
+  --bg-panel-muted: rgba(18, 27, 35, 0.72);
+  --line-soft: rgba(255, 255, 255, 0.14);
+  --line-strong: rgba(176, 236, 233, 0.28);
+  --text-primary: #eff9fc;
+  --text-muted: #aac0cd;
+  --text-dim: #7d95a4;
+  --accent-cyan: #8cf1de;
+  --accent-blue: #8cb8ff;
+  --accent-amber: #ffd38a;
+  --accent-red: #ff8098;
+  --accent-green: #6ce9c1;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--text-primary);
+  background-color: var(--bg-base);
+  background-image:
+    radial-gradient(circle at 18% 14%, rgba(140, 241, 222, 0.08), transparent 24%),
+    radial-gradient(circle at 84% 2%, rgba(140, 184, 255, 0.06), transparent 22%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0));
+  font-family: 'Segoe UI', 'IBM Plex Sans', 'Helvetica Neue', sans-serif;
+  font-family: 'Outfit', 'Segoe UI Variable Display', sans-serif;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.14;
+  background-image:
+    linear-gradient(rgba(176, 236, 233, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(176, 236, 233, 0.025) 1px, transparent 1px);
+  background-size: 52px 52px;
+  mask-image: radial-gradient(circle at center, black 62%, transparent 100%);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(124, 151, 176, 0.45) rgba(11, 17, 24, 0.9);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: rgba(11, 17, 24, 0.92);
+}
+
+*::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 2px solid rgba(11, 17, 24, 0.92);
+  background: rgba(118, 152, 178, 0.64);
+}
+
+::selection {
+  background: rgba(140, 241, 222, 0.24);
+  color: #f5fbff;
+}
+
+.control-shell {
+  position: relative;
+  isolation: isolate;
+}
+
+.control-panel {
+  background: rgba(15, 23, 31, 0.82);
+  border: 1px solid var(--line-soft);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 24px 60px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(22px) saturate(125%);
+}
+
+.control-panel-muted {
+  background: rgba(18, 27, 35, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.control-input {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(9, 15, 22, 0.92);
+  color: var(--text-primary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(16px) saturate(120%);
+}
+
+.control-input:focus {
+  border-color: rgba(140, 241, 222, 0.78);
+  box-shadow:
+    0 0 0 1px rgba(140, 241, 222, 0.28),
+    0 0 0 4px rgba(140, 241, 222, 0.08);
+  outline: none;
+}

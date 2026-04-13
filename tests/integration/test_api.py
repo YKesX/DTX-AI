@@ -14,7 +14,7 @@ import pytest
 try:
     from httpx import AsyncClient, ASGITransport
     from main import app
-    from api.database import init_db
+    from api.database import clear_events, init_db
     from api.live_metrics import live_metrics
     from api.routes.events import _normalize_gt_label
     _HTTPX_AVAILABLE = True
@@ -32,6 +32,7 @@ pytestmark = pytest.mark.skipif(
 async def setup_db():
     """Initialise the SQLite DB before each test (mirrors the lifespan)."""
     await init_db()
+    await clear_events()
     live_metrics.reset()
 
 
@@ -174,3 +175,96 @@ async def test_clear_alerts_resets_logs_and_metrics():
         metrics = metrics_resp.json()
         assert metrics.get("total_replayed") == 0
         assert metrics.get("total_correct") == 0
+
+
+@pytest.mark.asyncio
+async def test_asset_timeline_returns_sensor_history_in_time_order():
+    payloads = [
+        {
+            "asset_id": "timeline-asset-01",
+            "zone_id": "zone-T",
+            "vibration": 2.0,
+            "temperature": 32.0,
+            "humidity": 45.0,
+            "pressure": 1009.0,
+            "timestamp": "2026-04-09T10:00:00Z",
+        },
+        {
+            "asset_id": "timeline-asset-01",
+            "zone_id": "zone-T",
+            "vibration": 7.5,
+            "temperature": 38.0,
+            "humidity": 46.0,
+            "pressure": 1010.0,
+            "timestamp": "2026-04-09T10:01:00Z",
+        },
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        for payload in payloads:
+            resp = await client.post("/events/", json=payload)
+            assert resp.status_code == 202
+
+        timeline_resp = await client.get("/assets/timeline-asset-01/timeline?limit=10")
+
+    assert timeline_resp.status_code == 200
+    body = timeline_resp.json()
+    assert body["asset_id"] == "timeline-asset-01"
+    assert len(body["points"]) == 2
+    assert body["points"][0]["timestamp"] < body["points"][1]["timestamp"]
+    assert body["points"][0]["vibration"] == 2.0
+    assert body["points"][1]["temperature"] == 38.0
+
+
+@pytest.mark.asyncio
+async def test_alert_actions_persist_and_derive_operator_state():
+    payload = {
+        "asset_id": "operator-asset-01",
+        "zone_id": "zone-O",
+        "vibration": 14.0,
+        "temperature": 80.0,
+        "humidity": 45.0,
+        "pressure": 1012.0,
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        event_resp = await client.post("/events/", json=payload)
+        assert event_resp.status_code == 202
+        event_id = event_resp.json()["event"]["event_id"]
+
+        assign_resp = await client.post(
+            f"/alerts/{event_id}/actions",
+            json={
+                "action_type": "assign",
+                "assignee": "Hakki",
+                "note": "Forward to maintenance",
+            },
+        )
+        assert assign_resp.status_code == 201
+        assign_body = assign_resp.json()
+        assert assign_body["state"]["operator_status"] == "assigned"
+        assert assign_body["state"]["assigned_to"] == "Hakki"
+
+        resolve_resp = await client.post(
+            f"/alerts/{event_id}/actions",
+            json={
+                "action_type": "resolve",
+                "note": "Issue cleared after inspection",
+            },
+        )
+        assert resolve_resp.status_code == 201
+        assert resolve_resp.json()["state"]["operator_status"] == "resolved"
+        assert resolve_resp.json()["state"]["assigned_to"] == "Hakki"
+
+        actions_resp = await client.get(f"/alerts/{event_id}/actions")
+        assert actions_resp.status_code == 200
+        actions_body = actions_resp.json()
+        assert actions_body["state"]["operator_status"] == "resolved"
+        assert len(actions_body["actions"]) == 2
+        assert actions_body["actions"][0]["action_type"] == "resolve"
+
+        alerts_resp = await client.get("/alerts/")
+        assert alerts_resp.status_code == 200
+        alert_row = alerts_resp.json()["alerts"][0]
+        assert alert_row["operator_status"] == "resolved"
+        assert alert_row["assigned_to"] == "Hakki"

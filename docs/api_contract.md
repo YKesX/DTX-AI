@@ -122,7 +122,11 @@ since those are not persisted to the database in the current MVP.
       "anomaly_type": "vibration",
       "severity": "warning",
       "summary": "Anomaly detected on asset 'conveyor-belt-01'...",
-      "raw_payload": "{...}"
+      "raw_payload": "{...}",
+      "operator_status": "assigned",
+      "assigned_to": "Maintenance Team",
+      "last_action": "assign",
+      "last_action_at": "2026-04-09T12:05:00Z"
     }
   ],
   "count": 1
@@ -132,6 +136,105 @@ since those are not persisted to the database in the current MVP.
 > **Note:** `is_anomaly` is stored as an integer (`0`/`1`) in SQLite.
 > The dashboard `normalizeAlert` helper coerces this to a boolean.
 > `raw_payload` is a JSON string of the original `EventIn`.
+
+---
+
+### `GET /assets/{asset_id}/timeline?limit=50`
+
+Returns the most recent persisted points for a single asset, ordered oldest to newest.
+This endpoint powers the asset drilldown chart in the dashboard.
+
+**Response 200**
+```json
+{
+  "asset_id": "conveyor-belt-01",
+  "points": [
+    {
+      "event_id": "uuid",
+      "timestamp": "2026-04-09T12:00:00Z",
+      "vibration": 14.7,
+      "temperature": 82.3,
+      "humidity": 41.0,
+      "pressure": 1012.0,
+      "anomaly_score": 0.86,
+      "severity": "critical",
+      "predicted_label": "bearing_fault"
+    }
+  ]
+}
+```
+
+---
+
+### `GET /alerts/{event_id}/actions`
+
+Returns the operator action history and the derived operator state for a single alert.
+
+**Response 200**
+```json
+{
+  "event_id": "uuid",
+  "state": {
+    "operator_status": "assigned",
+    "assigned_to": "Maintenance Team",
+    "last_action": "assign",
+    "last_action_at": "2026-04-09T12:05:00Z"
+  },
+  "actions": [
+    {
+      "id": 3,
+      "event_id": "uuid",
+      "action_type": "assign",
+      "note": "Forwarded to maintenance",
+      "assignee": "Maintenance Team",
+      "created_at": "2026-04-09T12:05:00Z"
+    }
+  ]
+}
+```
+
+Allowed `action_type` values:
+
+- `acknowledge`
+- `assign`
+- `escalate`
+- `resolve`
+
+---
+
+### `POST /alerts/{event_id}/actions`
+
+Creates a new operator action for a persisted alert.
+
+**Request body**
+```json
+{
+  "action_type": "assign",
+  "assignee": "Maintenance Team",
+  "note": "Forwarded to maintenance"
+}
+```
+
+**Response 201**
+```json
+{
+  "event_id": "uuid",
+  "action": {
+    "id": 3,
+    "event_id": "uuid",
+    "action_type": "assign",
+    "note": "Forwarded to maintenance",
+    "assignee": "Maintenance Team",
+    "created_at": "2026-04-09T12:05:00Z"
+  },
+  "state": {
+    "operator_status": "assigned",
+    "assigned_to": "Maintenance Team",
+    "last_action": "assign",
+    "last_action_at": "2026-04-09T12:05:00Z"
+  }
+}
+```
 
 ---
 
@@ -173,6 +276,15 @@ deduplication and row selection work correctly across sources.
 | `ground_truth_name` | `event.metadata.ground_truth_name` | parsed from `raw_payload.metadata` |
 | `predicted_label` | `event.metadata.predicted_label` | parsed from `raw_payload.metadata` |
 | `prediction_correct` | `event.metadata.prediction_correct` | parsed from `raw_payload.metadata` |
+| `vibration` | `event.vibration` | parsed from `raw_payload.vibration` |
+| `temperature` | `event.temperature` | parsed from `raw_payload.temperature` |
+| `humidity` | `event.humidity` | parsed from `raw_payload.humidity` |
+| `pressure` | `event.pressure` | parsed from `raw_payload.pressure` |
+| `recommendation` | `explanation.recommendation` | parsed from `raw_payload.metadata.recommendation` if present, else fallback |
+| `operator_status` | optional route enrichment | `operator_status` |
+| `assigned_to` | optional route enrichment | `assigned_to` |
+| `last_action` | optional route enrichment | `last_action` |
+| `last_action_at` | optional route enrichment | `last_action_at` |
 
 ---
 
@@ -200,6 +312,10 @@ See `packages/shared/schemas.py` for the full Pydantic definitions.
 | `TwinUpdate` | Digital-twin status change (Isaac Sim adapter) |
 | `DashboardAlert` | Composed nested alert sent to dashboard |
 | `EventLog` | Flat persisted SQLite row |
+| `AlertActionIn` | Operator action request payload |
+| `AlertActionRecord` | Persisted operator action row |
+| `AlertOperatorState` | Derived operator workflow state |
+| `AssetTimelineResponse` | Asset drilldown timeline payload |
 
 ---
 

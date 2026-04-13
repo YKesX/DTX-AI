@@ -51,6 +51,15 @@ class AssetStatus(str, Enum):
     OFFLINE = "offline"
 
 
+class AlertActionType(str, Enum):
+    """Operator-side incident actions."""
+
+    ACKNOWLEDGE = "acknowledge"
+    ASSIGN = "assign"
+    ESCALATE = "escalate"
+    RESOLVE = "resolve"
+
+
 # ---------------------------------------------------------------------------
 # Core input schema
 # ---------------------------------------------------------------------------
@@ -180,3 +189,52 @@ class EventLog(BaseModel):
     severity: Severity
     summary: str
     raw_payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class AlertActionIn(BaseModel):
+    """Request payload for a new operator action."""
+
+    action_type: AlertActionType
+    note: str = Field(default="", max_length=500)
+    assignee: str = Field(default="", max_length=120)
+
+
+class AlertActionRecord(BaseModel):
+    """Persisted operator action record."""
+
+    id: int
+    event_id: UUID
+    action_type: AlertActionType
+    note: str = Field(default="")
+    assignee: str = Field(default="")
+    created_at: datetime
+
+
+class AlertOperatorState(BaseModel):
+    """Derived operator workflow state for an alert."""
+
+    operator_status: str = Field(default="new")
+    assigned_to: str = Field(default="")
+    last_action: AlertActionType | None = None
+    last_action_at: datetime | None = None
+
+
+class AssetTimelinePoint(BaseModel):
+    """One point in an asset drilldown timeline."""
+
+    event_id: UUID
+    timestamp: datetime
+    vibration: float | None = None
+    temperature: float | None = None
+    humidity: float | None = None
+    pressure: float | None = None
+    anomaly_score: float = 0.0
+    severity: Severity = Severity.INFO
+    predicted_label: str | None = None
+
+
+class AssetTimelineResponse(BaseModel):
+    """Response shape for asset drilldown history."""
+
+    asset_id: str
+    points: list[AssetTimelinePoint] = Field(default_factory=list)

@@ -6,7 +6,7 @@ export default function TopBar({ title, wsStatus }) {
   useEffect(() => {
     const tick = () =>
       setClock(
-        new Date().toLocaleTimeString('tr-TR', {
+        new Date().toLocaleTimeString('en-GB', {
           hour: '2-digit',
           minute: '2-digit',
           second: '2-digit',
@@ -20,24 +20,33 @@ export default function TopBar({ title, wsStatus }) {
   const isConnected = wsStatus === 'connected';
 
   return (
-    <header className="fixed top-0 left-56 right-0 h-14 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-6 z-20">
-      <h1 className="text-white font-semibold text-base">{title}</h1>
+    <header className="fixed left-56 right-0 top-0 z-20 flex h-16 items-center justify-between border-b border-white/10 bg-[rgba(9,14,20,0.82)] px-6 backdrop-blur-2xl">
+      <div>
+        <h1 className="text-base font-semibold text-white">{title}</h1>
+        <p className="text-[10px] uppercase tracking-[0.28em] text-slate-500">
+          Live Operations Layer
+        </p>
+      </div>
 
       <div className="flex items-center gap-4">
-        {/* WebSocket indicator */}
-        <div className="flex items-center gap-2 text-sm">
-          <span
-            className={`w-2.5 h-2.5 rounded-full ${
-              isConnected ? 'bg-green-400 shadow-[0_0_6px_#4ade80]' : 'bg-red-500'
-            }`}
-          />
-          <span className={isConnected ? 'text-green-400' : 'text-red-400'}>
-            WebSocket
-          </span>
+        <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-xl">
+          <div className="flex items-center gap-2">
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${
+                isConnected
+                  ? 'bg-[var(--accent-green)]'
+                  : 'bg-[var(--accent-red)]'
+              }`}
+            />
+            <span className={isConnected ? 'text-emerald-300' : 'text-red-300'}>
+              WebSocket
+            </span>
+          </div>
         </div>
 
-        {/* Clock */}
-        <span className="text-gray-400 text-sm font-mono">{clock}</span>
+        <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-xl">
+          <span className="font-mono text-sm text-gray-300">{clock}</span>
+        </div>
       </div>
     </header>
   );

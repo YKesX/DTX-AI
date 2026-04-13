@@ -1,27 +1,27 @@
 const severityClasses = {
   // Backend severity values
-  info:     'bg-blue-900/60 text-blue-300 border border-blue-700',
-  warning:  'bg-yellow-900/60 text-yellow-300 border border-yellow-700',
-  critical: 'bg-red-900/60 text-red-300 border border-red-700',
+  info:     'border border-emerald-300/35 bg-emerald-300/10 text-emerald-100',
+  warning:  'border border-amber-500/45 bg-amber-500/12 text-amber-200',
+  critical: 'border border-red-500/45 bg-red-500/14 text-red-200',
   // Legacy / mock severity values
-  low:      'bg-green-900/60 text-green-300 border border-green-700',
-  medium:   'bg-yellow-900/60 text-yellow-300 border border-yellow-700',
-  high:     'bg-orange-900/60 text-orange-300 border border-orange-700',
+  low:      'border border-sky-300/35 bg-sky-300/10 text-sky-100',
+  medium:   'border border-amber-500/45 bg-amber-500/12 text-amber-200',
+  high:     'border border-blue-400/45 bg-blue-400/12 text-blue-100',
 };
 
 const severityLabels = {
-  info:     'Bilgi',
-  warning:  'Uyarı',
-  critical: 'Kritik',
-  low:      'Düşük',
-  medium:   'Orta',
-  high:     'Yüksek',
+  info:     'Info',
+  warning:  'Warning',
+  critical: 'Critical',
+  low:      'Low',
+  medium:   'Medium',
+  high:     'High',
 };
 
 export default function Badge({ severity }) {
   return (
     <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide ${
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold tracking-wide ${
         severityClasses[severity] ?? severityClasses.low
       }`}
     >
