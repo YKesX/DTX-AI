@@ -1,0 +1,277 @@
+:root {
+  --ifm-color-primary: #111111;
+  --ifm-color-primary-dark: #000000;
+  --ifm-color-primary-darker: #000000;
+  --ifm-color-primary-darkest: #000000;
+  --ifm-color-primary-light: #2b2b2b;
+  --ifm-color-primary-lighter: #3d3d3d;
+  --ifm-color-primary-lightest: #5c5c5c;
+  --ifm-background-color: #f3f3ef;
+  --ifm-background-surface-color: #ffffff;
+  --ifm-navbar-background-color: rgba(255, 255, 255, 0.88);
+  --ifm-footer-background-color: #111111;
+  --ifm-font-color-base: #161616;
+  --ifm-heading-color: #111111;
+  --ifm-font-family-base: 'Avenir Next', 'Helvetica Neue', 'Segoe UI', sans-serif;
+  --ifm-heading-font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', serif;
+  --ifm-code-font-size: 0.9rem;
+  --ifm-heading-font-weight: 600;
+  --ifm-line-height-base: 1.7;
+  --ifm-global-radius: 18px;
+  --ifm-global-shadow-lw: 0 10px 30px rgba(0, 0, 0, 0.04);
+  --ifm-toc-border-color: rgba(17, 17, 17, 0.08);
+  --ifm-menu-color-active: #111111;
+  --ifm-menu-color-background-active: rgba(17, 17, 17, 0.05);
+  --ifm-menu-color-background-hover: rgba(17, 17, 17, 0.04);
+  --ifm-code-background: rgba(17, 17, 17, 0.05);
+  --docusaurus-highlighted-code-line-bg: rgba(17, 17, 17, 0.06);
+  --dtx-font-mono: 'SFMono-Regular', 'IBM Plex Mono', 'Menlo', monospace;
+  --dtx-font-heading: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', serif;
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #111111;
+  --ifm-color-primary-dark: #000000;
+  --ifm-color-primary-darker: #000000;
+  --ifm-color-primary-darkest: #000000;
+  --ifm-color-primary-light: #2b2b2b;
+  --ifm-color-primary-lighter: #3d3d3d;
+  --ifm-color-primary-lightest: #5c5c5c;
+  --ifm-background-color: #f3f3ef;
+  --ifm-background-surface-color: #ffffff;
+  --ifm-navbar-background-color: rgba(255, 255, 255, 0.88);
+  --ifm-footer-background-color: #111111;
+  --ifm-font-color-base: #161616;
+  --ifm-heading-color: #111111;
+  --ifm-toc-border-color: rgba(17, 17, 17, 0.08);
+  --ifm-menu-color-active: #111111;
+  --ifm-menu-color-background-active: rgba(17, 17, 17, 0.05);
+  --ifm-menu-color-background-hover: rgba(17, 17, 17, 0.04);
+  --ifm-code-background: rgba(17, 17, 17, 0.05);
+  --docusaurus-highlighted-code-line-bg: rgba(17, 17, 17, 0.06);
+}
+
+html {
+  background: var(--ifm-background-color);
+}
+
+body {
+  background:
+    radial-gradient(circle at top left, rgba(0, 0, 0, 0.05), transparent 24%),
+    linear-gradient(180deg, #ffffff 0%, var(--ifm-background-color) 100%);
+  color: var(--ifm-font-color-base);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--ifm-heading-font-family);
+  letter-spacing: -0.03em;
+}
+
+a {
+  transition: color 180ms ease, opacity 180ms ease;
+}
+
+.navbar {
+  border-bottom: 1px solid rgba(17, 17, 17, 0.08);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.04);
+  backdrop-filter: blur(14px);
+}
+
+.navbar__title {
+  font-family: var(--ifm-heading-font-family);
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  color: #111;
+}
+
+.navbar__link,
+.navbar-sidebar__brand .navbar__title {
+  font-family: var(--dtx-font-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.button {
+  border-radius: 999px;
+  padding-inline: 1.1rem;
+  font-family: var(--dtx-font-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  box-shadow: none;
+}
+
+.button--primary {
+  background: #111;
+  border-color: #111;
+  color: #fff;
+}
+
+.button--primary:hover {
+  background: #000;
+  border-color: #000;
+  color: #fff;
+}
+
+.button--secondary,
+.button.button--secondary.button--outline {
+  background: transparent;
+  border-color: rgba(17, 17, 17, 0.16);
+  color: #111;
+}
+
+.button--secondary:hover,
+.button.button--secondary.button--outline:hover {
+  border-color: #111;
+  color: #111;
+}
+
+.theme-doc-sidebar-container {
+  border-right: 1px solid rgba(17, 17, 17, 0.08);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.menu {
+  padding-block: 1.25rem;
+}
+
+.menu__link,
+.menu__caret:before {
+  border-radius: 14px;
+}
+
+.menu__link {
+  font-size: 0.95rem;
+}
+
+.menu__link--active {
+  font-weight: 600;
+  border: 1px solid rgba(17, 17, 17, 0.08);
+}
+
+.prism-code {
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 20px !important;
+  box-shadow: var(--ifm-global-shadow-lw);
+}
+
+code {
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 8px;
+  padding: 2px 6px;
+  color: #111;
+}
+
+.main-wrapper {
+  position: relative;
+}
+
+.theme-doc-markdown {
+  padding: 0 0 4rem;
+}
+
+.theme-doc-markdown > h1:first-child,
+.theme-doc-markdown > h2,
+.theme-doc-markdown > h3 {
+  color: #111;
+}
+
+.theme-doc-markdown > h2,
+.theme-doc-markdown > h3 {
+  padding-top: 0.6rem;
+}
+
+.theme-doc-markdown > h2 {
+  border-top: 1px solid rgba(17, 17, 17, 0.08);
+}
+
+.theme-doc-toc-desktop,
+.table-of-contents {
+  font-size: 0.88rem;
+}
+
+.table-of-contents__link--active {
+  font-weight: 600;
+}
+
+table {
+  display: table;
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1.5rem 0;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 18px;
+  overflow: hidden;
+  table-layout: auto;
+}
+
+table thead tr {
+  background: rgba(17, 17, 17, 0.05);
+}
+
+table tbody tr:nth-child(odd) {
+  background: rgba(17, 17, 17, 0.02);
+}
+
+table td,
+table th {
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  padding: 0.6rem 0.9rem;
+}
+
+.alert {
+  border-radius: 20px;
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  box-shadow: none;
+}
+
+.footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.08), transparent 30%),
+    #111111;
+}
+
+.footer__title,
+.footer__link-item,
+.footer__copyright {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.footer__title {
+  font-family: var(--dtx-font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.pagination-nav__link {
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.pagination-nav__sublabel {
+  font-family: var(--dtx-font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+@media screen and (max-width: 996px) {
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .navbar__link {
+    letter-spacing: 0.1em;
+  }
+}

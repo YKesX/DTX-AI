@@ -1,0 +1,130 @@
+.features {
+  padding: 2rem 0 0;
+  width: 100%;
+}
+
+.header {
+  display: grid;
+  gap: 0.6rem;
+  margin-bottom: 2rem;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.78rem;
+  font-family: var(--dtx-font-mono);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #5d5d5d;
+}
+
+.title,
+.workflowTitle {
+  margin: 0;
+  max-width: 34rem;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.card {
+  display: block;
+  min-height: 100%;
+  padding: 1.5rem;
+  border: 1px solid rgba(17, 17, 17, 0.1);
+  border-radius: 24px;
+  background: #fff;
+  color: inherit;
+  text-decoration: none;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.card:hover {
+  color: inherit;
+  transform: translateY(-4px);
+  border-color: rgba(17, 17, 17, 0.3);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.08);
+}
+
+.index,
+.workflowNumber {
+  margin: 0 0 1rem;
+  font-family: var(--dtx-font-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #6a6a6a;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.cardDescription,
+.workflowCopy,
+.workflowItem p {
+  margin: 1rem 0 0;
+  color: #4d4d4d;
+  line-height: 1.75;
+}
+
+.cardMeta {
+  margin: 1.4rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(17, 17, 17, 0.08);
+  font-family: var(--dtx-font-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #111;
+}
+
+.workflowSection {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 1rem;
+  margin-top: 3rem;
+}
+
+.workflowIntro,
+.workflowList {
+  padding: 1.5rem;
+  border: 1px solid rgba(17, 17, 17, 0.1);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.workflowList {
+  display: grid;
+  gap: 1rem;
+}
+
+.workflowItem {
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(17, 17, 17, 0.08);
+}
+
+.workflowItem:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.workflowItem p {
+  margin-top: 0.4rem;
+}
+
+@media screen and (max-width: 996px) {
+  .grid,
+  .workflowSection {
+    grid-template-columns: 1fr;
+  }
+}
