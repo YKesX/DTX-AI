@@ -1,19 +1,16 @@
 # -*- coding: utf-8 -*-
 """Data preprocessing utilities for the industrial IoT fault detection model.
 
-This module downloads the source dataset from Kaggle, performs feature
-engineering, splits the data into train/test sets, fits and persists a
-StandardScaler, and provides helpers for preprocessing single records for
-inference and running the end-to-end preprocessing pipeline.
+This module loads the local master dataset, performs feature engineering, 
+splits the data into train/test sets, fits and persists a StandardScaler, 
+and provides helpers for preprocessing single records for inference.
 """
 
 # preprocessing.py
 
 import pandas as pd
 import numpy as np
-import kagglehub
 import joblib
-import os
 import threading
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -30,21 +27,29 @@ FEATURES = [
 ]
 
 
-def load_data():
-    """Downloads dataset from Kaggle and loads into DataFrame."""
-    path = kagglehub.dataset_download("ziya07/industrial-iot-fault-detection-dataset")
+def load_data(file_name="dtx_ai_master_dataset.csv"):
+    """Loads dataset from local CSV with correct encoding and cleaning."""
+    # encoding='latin1' to handle special characters
+    df = pd.read_csv(file_name, encoding='latin1')
+    
+    # ── FIX: Rename the broken temperature column ──
+    # This maps 'Temperature (ï¿½C)' back to 'Temperature (°C)'
+    rename_dict = {col: 'Temperature (°C)' for col in df.columns if 'Temperature' in col}
+    df = df.rename(columns=rename_dict)
 
-    files = os.listdir(path)
-    csv_file = [f for f in files if f.endswith('.csv')][0]
+    #Drop unused columns
+    to_drop = ['Zone', 'RMS Vibration', 'Mean Temp']
+    for col in to_drop:
+        if col in df.columns:
+            df = df.drop(columns=[col])
 
-    df = pd.read_csv(f"{path}/{csv_file}")
-
-    # Drop constant columns — same value across all rows, no predictive value
-    df = df.drop(columns=['RMS Vibration', 'Mean Temp'])
 
     # Parse and sort by timestamp
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
     df = df.sort_values('Timestamp').reset_index(drop=True)
+
+    # Debug: Print actual column names to see the mismatch
+    print("Actual column names:", df.columns.tolist())
 
     return df
 
@@ -121,16 +126,20 @@ def preprocess_single(raw_input: dict, scaler_path='scaler.pkl', window_buffer: 
 
     window_size = 5
 
-    if window_buffer is None or len(window_buffer) < window_size:
-        raise ValueError(f"window_buffer must contain at least {window_size} previous readings")
+    if window_buffer is None:
+        raise ValueError("A window_buffer list must be provided.")
 
-    # Add current reading to buffer
+    # 1. Append the new reading first
     window_buffer.append(raw_input)
 
-    # Prune buffer to keep only the last `window_size` readings
+    # 2. Keep only the most recent 'window_size' records
     if len(window_buffer) > window_size:
         window_buffer[:] = window_buffer[-window_size:]
 
+    # 3. IF BUFFER IS NOT FULL: Return None instead of crashing
+    if len(window_buffer) < window_size:
+        return None
+    
     # Build DataFrame from buffer
     df_buffer = pd.DataFrame(window_buffer)
     df_buffer['Timestamp'] = pd.to_datetime(df_buffer['Timestamp'])
