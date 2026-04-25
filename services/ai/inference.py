@@ -1,5 +1,5 @@
 # inference.py
-# Stub inference pipeline — full integration to be completed
+"""Real-time inference pipeline for industrial IoT fault detection."""
 
 import json
 import joblib
@@ -32,18 +32,26 @@ def send_output(json_output):
     STUB — prints JSON output.
     Replace with real API call / WebSocket.
     """
-    print(json.dumps(json_output, indent=2))
+    if json_output:
+        print(json.dumps(json_output, indent=2))
+    else:
+        print("Waiting for buffer to fill...")
 
 # ── Inference pipeline ────────────────────────────────────
 def run_inference(raw_input, window_buffer):
     """
     Processes a single sensor reading and returns JSON output.
     """
-    # Preprocess
+    # Preprocess: Get scaled data for the model
+    # Returns None if buffer < 5
     X_scaled = preprocess_single(raw_input, 'scaler.pkl', window_buffer)
 
+    # Safety Check: If buffer is not full, do not predict
+    if X_scaled is None:
+        return None
+    
     # Predict
-    anomaly_class_id = model.predict(X_scaled)[0]
+    anomaly_class_id = int(model.predict(X_scaled)[0])
     anomaly_proba    = model.predict_proba(X_scaled)[0]
     anomaly_score    = float(max(anomaly_proba))
 
@@ -51,11 +59,19 @@ def run_inference(raw_input, window_buffer):
     class_map = {
         0: "no_fault",
         1: "bearing_fault",
-        2: "overheating"
+        2: "overheating",
+        3: "pressure_spike",
+        4: "cold_start_stress",
+        5: "thermal_runaway",
+        6: "idle_overpressure"
     }
 
     # Build input_features dict
-    input_features = dict(zip(FEATURES, X_scaled[0].tolist()))
+    input_features = {
+    "Vibration (mm/s)": raw_input.get("Vibration (mm/s)"),
+    "Temperature (°C)": raw_input.get("Temperature (°C)"),
+    "Pressure (bar)":   raw_input.get("Pressure (bar)")
+    }
 
     # Build JSON output
     output = {
@@ -71,11 +87,12 @@ def run_inference(raw_input, window_buffer):
 if __name__ == "__main__":
     window_buffer = []
 
-    raw_input = get_incoming_data()
+    for i in range(6):
+        raw_input = get_incoming_data()
 
-    # Fill buffer if not enough history
-    if len(window_buffer) < 5:
-        window_buffer = [raw_input] * 5
+        # Manually update the timestamp for the simulation
+        raw_input["Timestamp"] = f"2026-03-25T03:21:0{i}"
 
-    output = run_inference(raw_input, window_buffer)
-    send_output(output)
+        output = run_inference(raw_input, window_buffer)
+        print(f"--- Second {i+1} ---")
+        send_output(output)
