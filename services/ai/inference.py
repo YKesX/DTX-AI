@@ -66,18 +66,22 @@ def run_inference(raw_input, window_buffer):
         6: "idle_overpressure"
     }
 
-    # Build input_features dict
-    input_features = {
-    "Vibration (mm/s)": raw_input.get("Vibration (mm/s)"),
-    "Temperature (°C)": raw_input.get("Temperature (°C)"),
-    "Pressure (bar)":   raw_input.get("Pressure (bar)")
+    # Build raw sensor values for dashboard
+    raw_input_data = {
+        "Vibration (mm/s)": raw_input.get("Vibration (mm/s)"),
+        "Temperature (°C)": raw_input.get("Temperature (°C)"),
+        "Pressure (bar)":   raw_input.get("Pressure (bar)")
     }
 
+    # Build scaled features for SHAP
+    input_features = dict(zip(FEATURES, X_scaled[0].tolist()))
+    
     # Build JSON output
     output = {
         "timestamp":      raw_input["Timestamp"],
         "anomaly_class":  class_map[anomaly_class_id],
         "anomaly_score":  round(anomaly_score, 4),
+        "raw_input":      raw_input_data,
         "input_features": input_features
     }
 
