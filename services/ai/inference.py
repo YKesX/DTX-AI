@@ -66,6 +66,12 @@ def run_inference(raw_input, window_buffer):
         6: "idle_overpressure"
     }
 
+     # Build probabilities dict
+    probabilities = {
+        class_map[i]: round(float(p), 4)
+        for i, p in enumerate(anomaly_proba)
+    }
+    
     # Build raw sensor values for dashboard
     raw_input_data = {
         "Vibration (mm/s)": raw_input.get("Vibration (mm/s)"),
@@ -81,6 +87,7 @@ def run_inference(raw_input, window_buffer):
         "timestamp":      raw_input["Timestamp"],
         "anomaly_class":  class_map[anomaly_class_id],
         "anomaly_score":  round(anomaly_score, 4),
+        "probabilities":  probabilities,
         "raw_input":      raw_input_data,
         "input_features": input_features
     }
