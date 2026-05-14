@@ -88,7 +88,7 @@ The system follows a **synchronous request-driven pipeline** with a WebSocket br
 | CSS | TailwindCSS | 3.4.6 | Styling |
 | Charts | Recharts | 2.12.7 | Line/bar charts |
 | Routing | React Router v6 | 6.24.0 | Client-side navigation |
-| Shared schemas | dtx-ai-shared | 2.0.0 | Inter-service contracts |
+| Shared schemas | dtx-ai-shared | 2.0 | Inter-service contracts |
 
 ---
 
