@@ -80,3 +80,28 @@ runtime model inference, explanation, and dashboard visibility.
 - Replace rule-based detector with a trained Isolation Forest or Autoencoder.
 - Add a message queue (Redis Streams or NATS) between API and AI service for high-throughput scenarios.
 - Isaac Sim integration can be extended to use Omniverse Nucleus for multi-user scene collaboration.
+
+---
+
+## Verification Layers
+
+The current codebase is verified through three complementary test layers:
+
+1. **Unit tests** — `tests/unit/`
+   Covers helper logic in `apps/api/api/routes/events.py`, `apps/api/api/database.py`,
+   `apps/api/api/config.py`, `apps/api/api/ws_manager.py`, and the stubbed Isaac Sim
+   modules under `apps/sim/sim/`.
+2. **Smoke tests** — `tests/smoke/`
+   Covers schemas, replay helper utilities, model-loader behavior, and the stable
+   rule-based AI fallback path.
+3. **Integration tests** — `tests/integration/`
+   Exercises the FastAPI app through ASGI requests for ingestion, metrics, timeline,
+   alerts, and operator-action workflows.
+
+Recommended repo-root command:
+
+```bash
+PYTHONPATH="packages:services:services/ai:apps/api:apps/sim" .venv/bin/pytest -q
+```
+
+Current local baseline after the latest unit-test expansion: `54 passed`.

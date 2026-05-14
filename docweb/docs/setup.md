@@ -97,14 +97,25 @@ This is the exact notebook sweep (5 splits × per-model HP grid = 220 fits). On 
 
 ```bash
 # All tests (from repo root)
-PYTHONPATH="packages:services:services/ai:apps/api" pytest
+PYTHONPATH="packages:services:services/ai:apps/api:apps/sim" .venv/bin/pytest -q
+
+# Unit tests only
+PYTHONPATH="packages:services:services/ai:apps/api:apps/sim" .venv/bin/pytest -q tests/unit
 
 # Integration tests only
-pytest tests/integration/
+.venv/bin/pytest -q tests/integration/
 
 # Smoke tests only
-pytest tests/smoke/
+.venv/bin/pytest -q tests/smoke/
 ```
+
+Current checked-in suite structure:
+
+- `tests/unit/` — helper-heavy module coverage for event-route helpers, SQLite/database helpers, config parsing, WebSocket connection management, and Isaac Sim adapter/stub behavior
+- `tests/smoke/` — stable runtime checks for schemas, replay helpers, model loading, and the rule-based fallback path
+- `tests/integration/` — ASGI-level API route coverage across ingestion, metrics, timeline, and operator-action flows
+
+At the time of the `v2.0` docs refresh, the suite passes locally at `54 passed`.
 
 ---
 

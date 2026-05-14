@@ -88,7 +88,13 @@ DTX-AI/
 │   └── train_models.py               # One-shot retrain of every artifact
 │
 ├── tests/
-│   ├── integration/test_api.py
+│   ├── integration/
+│   │   └── test_api.py
+│   ├── unit/
+│   │   ├── test_config_and_ws_manager.py
+│   │   ├── test_database_helpers.py
+│   │   ├── test_events_helpers.py
+│   │   └── test_sim_adapter_and_hooks.py
 │   └── smoke/
 │       ├── test_ai_pipeline.py
 │       ├── test_live_metrics.py
@@ -119,3 +125,11 @@ DTX-AI/
 | `services/ai/xai_explainer.py` | SHAP TreeExplainer + explanation text generation |
 | `packages/shared/schemas.py` | All canonical Pydantic v2 schemas |
 | `scripts/train_models.py` | One-shot retrain of every artifact |
+
+## Test Layers
+
+| Test layer | Purpose |
+|---|---|
+| `tests/unit/` | Fast feedback for helper logic in API, config, database, websocket, and Isaac Sim stub modules |
+| `tests/smoke/` | Stable behavior checks for schemas, replay helpers, runtime loading, and fallback AI pipeline flow |
+| `tests/integration/` | End-to-end FastAPI route coverage through the in-process AI pipeline and SQLite-backed API behavior |

@@ -145,7 +145,36 @@ This powers the drilldown chart for:
 - pressure
 - anomaly score
 
-## 11) Later stages (not current path)
+## 11) Test matrix
+
+Current automated suite is organized into three layers:
+
+- `tests/unit/`
+  - event-route helpers (`_normalize_gt_label`, `_build_twin_update`, label mapping)
+  - database helpers (`_parse_payload`, operator-state derivation, timeline extraction, clear/reset flow)
+  - config parsing and `ConnectionManager`
+  - Isaac Sim adapter / scene / lifecycle stub behavior
+- `tests/smoke/`
+  - schemas
+  - replay helper script behavior
+  - model loader and strict replay selection
+  - rule-based detector / explainer / async pipeline path
+- `tests/integration/`
+  - FastAPI `/health`, `/events/`, `/alerts/`, `/metrics/live`, `/assets/{id}/timeline`
+  - operator actions and derived state
+
+Recommended commands:
+
+```bash
+PYTHONPATH="packages:services:services/ai:apps/api:apps/sim" .venv/bin/pytest -q
+PYTHONPATH="packages:services:services/ai:apps/api:apps/sim" .venv/bin/pytest -q tests/unit
+.venv/bin/pytest -q tests/smoke
+.venv/bin/pytest -q tests/integration
+```
+
+Current local baseline after the new unit-test additions: `54 passed`.
+
+## 12) Later stages (not current path)
 
 - Isaac Sim live integration
 - hardware sensor ingestion
