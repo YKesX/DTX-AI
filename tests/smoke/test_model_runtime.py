@@ -35,18 +35,27 @@ def test_explicit_model_selection_falls_back_when_missing_dependency(monkeypatch
     assert runtime.available is True or runtime.reason != ""
 
 
+# Profile near the bearing_wear class mean so the trained model sees an
+# in-distribution input; keeps these smoke tests stable across retrains.
+_BEARING_WEAR_PROFILE = dict(
+    imu_lin_acc_x=-9.77, imu_lin_acc_y=0.0, imu_lin_acc_z=0.86,
+    imu_ang_vel_x=0.0, imu_ang_vel_y=0.0, imu_ang_vel_z=0.0,
+    vibration_magnitude=9.82,
+    lift_joint_position=-0.15, lift_force_z=-0.44, lift_joint_velocity=0.0,
+    pseudo_pressure_pa=-5.56,
+    drive_joint_velocity=0.0, drive_joint_effort=2812.0,
+    roller_fl_velocity=0.01, roller_fr_velocity=0.0,
+    roller_bl_velocity=0.01, roller_br_velocity=0.0,
+    power_dissipated_w=299.0,
+    temperature_c=27.2,
+)
+
+
 def test_tree_inference_smoke_with_forced_random_forest(monkeypatch):
     _clear_cache()
     monkeypatch.setenv("DTX_ACTIVE_MODEL", "random_forest")
     monkeypatch.delenv("DTX_FORCE_STUB", raising=False)
-    event = EventIn(
-        asset_id="conveyor-belt-01",
-        zone_id="zone-A",
-        vibration=14.0,
-        temperature=82.0,
-        humidity=40.0,
-        pressure=1010.0,
-    )
+    event = EventIn(asset_id="forklift-01", zone_id="zone-A", **_BEARING_WEAR_PROFILE)
     result = detect(event)
     assert 0.0 <= result.anomaly_score <= 1.0
     assert result.event_id == event.event_id
@@ -55,17 +64,9 @@ def test_tree_inference_smoke_with_forced_random_forest(monkeypatch):
 def test_lstm_ae_missing_threshold_graceful(monkeypatch):
     _clear_cache()
     monkeypatch.setenv("DTX_ACTIVE_MODEL", "lstm_ae")
-    event = EventIn(
-        asset_id="pump-station-02",
-        zone_id="zone-B",
-        vibration=5.0,
-        temperature=55.0,
-        humidity=45.0,
-        pressure=1012.0,
-    )
+    event = EventIn(asset_id="forklift-02", zone_id="zone-B", **_BEARING_WEAR_PROFILE)
     result = detect(event)
     assert 0.0 <= result.anomaly_score <= 1.0
-    # Metadata currently has null threshold; detector must not crash or fabricate invalid outputs.
     assert result.event_id == event.event_id
 
 
@@ -79,13 +80,11 @@ def test_strict_selection_fails_for_unknown_model():
 def test_detect_strict_replay_raises_when_selected_model_missing(monkeypatch):
     _clear_cache()
     monkeypatch.setenv("DTX_REPLAY_STRICT", "1")
+    # At least one sensor channel must be non-None or the detector short-circuits
+    # to the rule-based stub before evaluating strict-replay model selection.
     event = EventIn(
-        asset_id="strict-asset",
-        zone_id="zone-S",
-        vibration=10.0,
-        temperature=45.0,
-        humidity=40.0,
-        pressure=1008.0,
+        asset_id="strict-asset", zone_id="zone-S",
+        **_BEARING_WEAR_PROFILE,
         metadata={"active_model": "missing_model", "replay_strict": True},
     )
     try:

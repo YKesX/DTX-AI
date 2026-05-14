@@ -2,33 +2,45 @@
   "model_name": "best_lstmae.pth",
   "model_family": "lstm_autoencoder_pytorch",
   "trained_on_dataset": "ziya07/industrial-iot-fault-detection-dataset",
-  "feature_count": 9,
+  "feature_count": 19,
+  "num_classes": 6,
   "feature_order_ref": "services/ai/models/shared/feature_order.json",
   "scaler_required": true,
   "input_shape": {
     "batch": "N",
     "sequence_length": 1,
-    "feature_dim": 9
+    "feature_dim": 19
   },
   "class_mapping": {
-    "0": "normal",
-    "1": "anomaly"
+    "0": "nominal",
+    "1": "bearing_wear",
+    "2": "overheat",
+    "3": "overload",
+    "4": "pressure_fault",
+    "5": "wheel_slip"
   },
   "training_split": "70/10/20",
   "best_params": {
-    "epochs": 50,
-    "hidden": 64,
-    "latent": 8,
-    "lr": 0.01
+    "epochs": 20,
+    "hidden": 32,
+    "latent": 16,
+    "lr": 0.001,
+    "batch": 64,
+    "lambda_recon": 1.0,
+    "lambda_cls": 1.0,
+    "dropout": 0.2,
+    "weight_decay": 0.0001
   },
   "metrics": {
-    "accuracy": 0.65,
-    "f1": 0.607227,
-    "precision": 0.625992,
-    "auroc": null
+    "val_accuracy": 0.997688,
+    "val_f1": 0.997689,
+    "val_precision": 0.997701,
+    "test_accuracy": 0.996759,
+    "test_f1": 0.996757,
+    "test_precision": 0.996764,
+    "test_reconstruction_mse": 1.672373
   },
-  "decision_type": "reconstruction_error_threshold",
-  "threshold_method": "95th_percentile_of_normal_train_reconstruction_error",
-  "default_threshold": null,
-  "notes": "Best reported F1 among current saved artifacts, but runtime use is incomplete until the actual numeric threshold and model class loading code are confirmed."
+  "decision_type": "multiclass_classifier_with_reconstruction",
+  "default_threshold": 0.5,
+  "notes": "Trained via scripts/train_models.py \u2014 exact mirror of dtxai_model_training.ipynb cell 8. Architecture is ai.lstm_classifier.LSTMAutoencoderClassifier."
 }

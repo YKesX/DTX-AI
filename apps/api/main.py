@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="DTX-AI API",
     description="Smart Warehouse XAI Digital Twin backend",
-    version="0.2.0",
+    version="v2.0",
     lifespan=lifespan,
 )
 

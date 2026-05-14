@@ -2,26 +2,34 @@
   "model_name": "best_rf.pkl",
   "model_family": "random_forest",
   "trained_on_dataset": "ziya07/industrial-iot-fault-detection-dataset",
-  "feature_count": 9,
+  "feature_count": 19,
+  "num_classes": 6,
   "feature_order_ref": "services/ai/models/shared/feature_order.json",
   "scaler_required": true,
   "class_mapping": {
-    "0": "no_fault",
-    "1": "bearing_fault",
-    "2": "overheating"
+    "0": "nominal",
+    "1": "bearing_wear",
+    "2": "overheat",
+    "3": "overload",
+    "4": "pressure_fault",
+    "5": "wheel_slip"
   },
-  "training_split": "60/10/30",
+  "training_split": "80/10/10",
   "best_params": {
-    "n_estimators": 200,
-    "max_depth": 3
+    "n_estimators": 100,
+    "max_depth": 5
   },
   "metrics": {
-    "accuracy": 0.45,
-    "f1": 0.374059,
-    "precision": 0.376439,
-    "auroc": 0.52594
+    "val_accuracy": 0.998844,
+    "val_f1": 0.998843,
+    "val_precision": 0.998851,
+    "val_auroc": 0.99999,
+    "test_accuracy": 0.998148,
+    "test_f1": 0.998147,
+    "test_precision": 0.998156
   },
   "decision_type": "multiclass_classifier",
   "default_threshold": null,
-  "notes": "Fallback tree model. Not preferred as the first runtime default."
+  "supports_tree_xai": true,
+  "notes": "Trained via scripts/train_models.py \u2014 exact mirror of dtxai_model_training.ipynb cells 5/6/7."
 }

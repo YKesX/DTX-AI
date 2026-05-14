@@ -12,72 +12,104 @@ All ML inference and explainability logic lives in `services/ai/`. It is importe
 
 ## Model Registry
 
-Four model families are supported. Active model is selected via `MODEL_NAME` env var or `model_registry.json`.
+Four model families are supported. Active model is selected by event `metadata.active_model`, then the `DTX_ACTIVE_MODEL` env var, then `model_registry.json`'s `active_model`.
 
-| Model | Artifact | Family | XAI Support | Notes |
+| Model | Artifact | Family | XAI Support | Test F1 |
 |---|---|---|---|---|
-| LightGBM | `best_lgbm.pkl` | `lightgbm` | ✅ TreeExplainer | Primary recommended |
-| XGBoost | `best_xgb.pkl` | `xgboost` | ✅ TreeExplainer | High accuracy |
-| Random Forest | `best_rf.pkl` | `random_forest` | ✅ TreeExplainer | Most interpretable |
-| LSTM-AE | `best_lstmae.pth` | `lstm_ae` | ❌ Fallback only | Reconstruction-error based |
+| LightGBM | `best_lgbm.pkl` | `lightgbm` | ✅ SHAP TreeExplainer | 0.9991 |
+| XGBoost | `best_xgb.pkl` | `xgboost` | ✅ SHAP TreeExplainer | 0.9991 |
+| Random Forest | `best_rf.pkl` | `random_forest` | ✅ SHAP TreeExplainer | 0.9985 |
+| LSTM-AE + classifier head | `best_lstmae.pth` | `lstm_autoencoder_pytorch` | ❌ Fallback only | 0.9981 |
 
-Models are loaded once on first call and **cached in-process** via `model_loader.py`.
+Models are loaded once on first call and cached in-process via `model_loader.py`. The metrics above are on a stratified-random 20% held-out test split and should be read as "the model has learned the regime labels of the synthetic-ish dataset"; see [Known Issues](/docs/known-issues) for why these numbers are not yet trustworthy.
 
 ---
 
-## Feature Engineering (9-Feature Vector)
+## Feature Set (19 raw sensor channels)
 
-Raw sensor readings are augmented with **per-asset rolling window statistics** (window = 5 events).
+The runtime uses the raw 19-channel sensor vector defined in
+[`services/ai/preprocessing.py:FEATURES`](https://github.com/YKesX/DTX-AI/blob/main/services/ai/preprocessing.py)
+and persisted to `services/ai/ai/models/shared/feature_order.json`. No rolling-window features are computed at runtime — the previous 9-feature pipeline (with `vib_rolling_mean`, `temp_drift`, etc.) was retired when the dataset switched to the richer Isaac-Sim-style schema.
 
-| Feature | Description |
+| Group | Channels |
 |---|---|
-| `Vibration (mm/s)` | Raw vibration reading |
-| `Temperature (°C)` | Raw temperature reading |
-| `Humidity (%)` | Raw humidity reading |
-| `Pressure (hPa)` | Raw pressure reading |
-| `vib_rolling_mean` | 5-event rolling mean of vibration |
-| `vib_rolling_std` | 5-event rolling std dev of vibration |
-| `vib_rolling_max` | 5-event rolling max of vibration |
-| `temp_rolling_mean` | 5-event rolling mean of temperature |
-| `temp_rolling_std` | 5-event rolling std dev of temperature |
+| IMU linear acceleration | `imu_lin_acc_x`, `imu_lin_acc_y`, `imu_lin_acc_z` |
+| IMU angular velocity | `imu_ang_vel_x`, `imu_ang_vel_y`, `imu_ang_vel_z` |
+| Vibration | `vibration_magnitude` |
+| Lift | `lift_joint_position`, `lift_force_z`, `lift_joint_velocity` |
+| Hydraulic | `pseudo_pressure_pa` |
+| Drive | `drive_joint_velocity`, `drive_joint_effort` |
+| Rollers | `roller_fl_velocity`, `roller_fr_velocity`, `roller_bl_velocity`, `roller_br_velocity` |
+| Bulk | `power_dissipated_w`, `temperature_c` |
 
-The canonical feature order is defined in `models/shared/feature_order.json`. A `StandardScaler` (fitted on training data) is applied before inference via `scaler.pkl`.
+A `StandardScaler` fit on the training split is applied before every inference call via `services/ai/ai/models/shared/scaler.pkl`. Feature order is positional — both the scaler and the model must see channels in the FEATURES order.
 
 ---
 
 ## Inference Pipeline
 
-For each incoming `EventIn`, the pipeline executes:
+For each incoming `EventIn`, `ai.pipeline.run_pipeline` executes:
 
 ```
-1. Get/init 5-event rolling window buffer for asset:zone
-2. Build 9-feature vector (raw + rolling stats)
-3. Apply StandardScaler (scaler.pkl)
-4. model.predict_proba() → anomaly_score [0..1]
-5. Threshold (default 0.5) → is_anomaly bool
-6. Determine anomaly_type + severity from score + readings
-7. SHAP TreeExplainer → contributing_features dict
-8. Compose ExplanationResult (summary text + recommendation)
+1. Build 19-channel feature vector from EventIn fields
+   (missing channels → 0.0)
+2. Apply StandardScaler (scaler.pkl)
+3. Run the active model:
+     • Tree model: predict_proba → argmax class + max-prob
+     • LSTM-AE+CLS: forward → (reconstruction, logits)
+                    softmax(logits) → argmax class + class confidence
+4. Map class id → AnomalyType + Severity via detector._CLASS_MAP
+5. Merge with rule-based guardrails (non-strict mode only)
+6. SHAP TreeExplainer (tree models) or fallback attribution
+7. Compose ExplanationResult (summary + recommendation)
 ```
 
-The `pipeline.py` entry point is `async def run_pipeline(event: EventIn)`, which offloads CPU-bound inference to `asyncio.to_thread`.
+`run_pipeline` is async and offloads CPU-bound inference to `asyncio.to_thread`.
+
+The LSTM-AE+CLS also stamps the following diagnostic fields into `event.metadata` so downstream tooling can inspect the model's view:
+
+- `lstm_predicted_class` — int
+- `lstm_class_confidence` — softmax probability of the argmax
+- `lstm_reconstruction_mse` — MSE of the autoencoder reconstruction
+- `lstm_class_probabilities` — full softmax distribution
+
+---
+
+## LSTM-AE+CLS Architecture
+
+Defined in [`services/ai/ai/lstm_classifier.py`](https://github.com/YKesX/DTX-AI/blob/main/services/ai/ai/lstm_classifier.py); the same class is imported by both the runtime and the training notebook so `state_dict` keys always line up.
+
+```
+input (B, 1, 19)
+   │
+   ▼
+LSTM encoder ─► last hidden (B, hidden) ─► Linear ─► latent (B, latent)
+                                                          │
+        ┌─────────────────────────────────────────────────┴──────────┐
+        ▼                                                            ▼
+Linear ─► initial hidden                                  classifier head
+LSTM decoder ──► Linear ─► reconstruction (B, 1, 19)      Linear ─ ReLU ─ Linear
+                                                          ─► logits (B, num_classes)
+```
+
+Best hyperparameters on the current dataset: `epochs=50, hidden=32, latent=8, lr=1e-3, batch=64, λ_recon=1.0, λ_cls=1.0`.
 
 ---
 
 ## XAI — Explainability Layer
 
-**SHAP (SHapley Additive exPlanations) TreeExplainer** is used for all tree-based models. It computes each feature's contribution to the model's prediction using Shapley values from cooperative game theory.
+**SHAP TreeExplainer** is used for all tree-based models. It computes each feature's contribution to the model's prediction using Shapley values from cooperative game theory.
 
 ```python
 explainer = shap.TreeExplainer(model)
 shap_values = explainer.shap_values(X)
-# Top-N features by |shap_value| → contributing_features dict
+# Top-3 features by |shap_value| → contributing_features dict
 ```
 
-The top features by absolute SHAP value are surfaced in the dashboard `ExplanationPanel` as a horizontal bar chart, making the model's reasoning visible to operators.
+The top-3 features by absolute SHAP value are surfaced in the dashboard `ExplanationPanel` as a horizontal bar chart, making the model's reasoning visible to operators.
 
 ### LSTM-AE Explainability
-LSTM-AE does **not** support SHAP (`supports_tree_xai: false` in registry). When active, explanation degrades to a generic summary string — no per-feature attribution.
+LSTM-AE does **not** support SHAP (`supports_tree_xai: false` in registry). When active, `explain()` returns a generic per-class summary string — no per-feature attribution. Adding `DeepExplainer` support is tracked in [Known Issues](/docs/known-issues).
 
 ---
 
@@ -87,9 +119,18 @@ In non-strict mode (`DTX_REPLAY_STRICT=0`), failures fall back gracefully:
 
 ```
 ML model inference fails
-    └─► Rule-based detector (threshold on raw readings)
-            └─► Stub explanation text (no SHAP values)
+    └─► Rule-based detector (threshold on raw channels)
+            └─► Fallback explanation (rule-based attribution, no SHAP)
 ```
+
+The rule-based detector uses 4 channels:
+
+| Channel | Threshold | Maps to |
+|---|---|---|
+| `temperature_c` | > 40 °C | `OVERHEAT` |
+| `\|pseudo_pressure_pa\|` | > 1000 Pa | `PRESSURE_FAULT` |
+| `power_dissipated_w` | > 500 W | `OVERLOAD` |
+| `vibration_magnitude` | > 15 m/s² | `BEARING_WEAR` |
 
 In strict mode (`DTX_REPLAY_STRICT=1`), any failure raises an exception — used to validate the full pipeline end-to-end during dataset replay.
 
@@ -97,9 +138,24 @@ In strict mode (`DTX_REPLAY_STRICT=1`), any failure raises an exception — used
 
 ## Fault Classes
 
-| Code | Name | Description |
-|---|---|---|
-| 0 | `no_fault` | Normal operating state |
-| 1 | `bearing_fault` | Abnormal vibration — mechanical bearing degradation |
-| 2 | `overheating` | Elevated temperature — thermal runaway or cooling failure |
-| 3 | `combined` | Multiple sensor readings simultaneously elevated |
+| Code | Label | Default severity | Discriminating signal |
+|---|---|---|---|
+| 0 | `nominal`        | info     | power ≈ 0, temperature ≈ 25 °C |
+| 1 | `bearing_wear`   | warning  | power ≈ 300 W, drive effort dip |
+| 2 | `overheat`       | critical | temperature ≈ 49 °C, power ≈ 2 kW, rollers ≈ 0.6 |
+| 3 | `overload`       | warning  | power ≈ 30 W on otherwise nominal channels |
+| 4 | `pressure_fault` | warning  | pseudo_pressure ≈ −8.5 kPa, lift_force_z ≈ −685 N |
+| 5 | `wheel_slip`     | warning  | rollers ≈ 0.7, drive_joint_velocity ≈ 0.37 |
+
+---
+
+## Retraining
+
+Every artifact in `services/ai/ai/models/` can be regenerated with:
+
+```bash
+source .venv/bin/activate
+python scripts/train_models.py
+```
+
+The script is a one-for-one mirror of [`services/ai/dtxai_model_training.ipynb`](https://github.com/YKesX/DTX-AI/blob/main/services/ai/dtxai_model_training.ipynb) cells 2–10: 5-split × per-model HP sweep (220 fits total), GPU is used automatically for the LSTM via PyTorch if a CUDA-capable device is present. On an RTX 3070 Ti the full run takes ~15 minutes.

@@ -8,12 +8,14 @@ sidebar_position: 12
 
 ## Current State
 
-The project is designed for **local development only**. No production deployment configuration exists in the repository (no Dockerfile, docker-compose.yml, or CI/CD workflows).
+The application runtime is still designed for **local development first**. There is no committed production container or infrastructure setup for the API/dashboard stack yet, but the repo does already ship GitHub Actions for CI and for docs deployment.
 
-**Local dev stack:**
+**What is in the repo today:**
 - Two background processes from `run_dev.sh`
 - SQLite database at `apps/api/api/dtx_ai.db`
 - CORS hardcoded to `allow_origins=["*"]`
+- `.github/workflows/ci.yml` for Python tests/lint and dashboard lint
+- `.github/workflows/deploy.yml` for Docusaurus GitHub Pages deploys
 
 ---
 
@@ -22,12 +24,12 @@ The project is designed for **local development only**. No production deployment
 This documentation is deployed via GitHub Pages using Docusaurus.
 
 ```bash
-# From the website/ folder in the repo
+# From the docweb/ folder in the repo
 npm run build
 npm run deploy   # pushes to gh-pages branch automatically
 ```
 
-Or set up GitHub Actions to auto-deploy on push to `main`.
+GitHub Actions deployment on push to `main` is already configured in `.github/workflows/deploy.yml`.
 
 ---
 
@@ -61,7 +63,7 @@ services:
     build: ./apps/api
     ports: ["8000:8000"]
     environment:
-      - MODEL_NAME=lightgbm
+      - DTX_ACTIVE_MODEL=lightgbm
   dashboard:
     build: ./apps/dashboard
     ports: ["5173:5173"]
@@ -71,19 +73,9 @@ services:
 
 ## CI/CD
 
-No CI/CD configuration is currently committed. Recommended setup:
+Two workflows are already committed:
 
-```yaml
-# .github/workflows/test.yml (suggested)
-on: [push, pull_request]
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
-      - run: pip install -r apps/api/requirements.txt -r services/ai/requirements.txt
-      - run: pip install -e packages/shared
-      - run: pytest tests/
-```
+- `ci.yml` runs Python tests plus optional linting and dashboard lint on pushes/PRs.
+- `deploy.yml` builds and publishes `docweb/` to GitHub Pages on pushes to `main`.
+
+If you want stricter CI later, the next useful upgrade would be failing the job on lint errors and adding a docs build check to pull requests.

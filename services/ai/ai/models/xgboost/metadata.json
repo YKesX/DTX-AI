@@ -2,27 +2,35 @@
   "model_name": "best_xgb.pkl",
   "model_family": "xgboost",
   "trained_on_dataset": "ziya07/industrial-iot-fault-detection-dataset",
-  "feature_count": 9,
+  "feature_count": 19,
+  "num_classes": 6,
   "feature_order_ref": "services/ai/models/shared/feature_order.json",
   "scaler_required": true,
   "class_mapping": {
-    "0": "no_fault",
-    "1": "bearing_fault",
-    "2": "overheating"
+    "0": "nominal",
+    "1": "bearing_wear",
+    "2": "overheat",
+    "3": "overload",
+    "4": "pressure_fault",
+    "5": "wheel_slip"
   },
-  "training_split": "60/10/30",
+  "training_split": "80/10/10",
   "best_params": {
-    "n_estimators": 200,
-    "max_depth": 5,
+    "n_estimators": 100,
+    "max_depth": 3,
     "learning_rate": 0.1
   },
   "metrics": {
-    "accuracy": 0.62,
-    "f1": 0.359669,
-    "precision": 0.395173,
-    "auroc": 0.516001
+    "val_accuracy": 1.0,
+    "val_f1": 1.0,
+    "val_precision": 1.0,
+    "val_auroc": 1.0,
+    "test_accuracy": 0.999074,
+    "test_f1": 0.999074,
+    "test_precision": 0.999075
   },
   "decision_type": "multiclass_classifier",
   "default_threshold": null,
-  "notes": "Tree model with possible future SHAP compatibility. Verify serialization and class probability behavior at runtime."
+  "supports_tree_xai": true,
+  "notes": "Trained via scripts/train_models.py \u2014 exact mirror of dtxai_model_training.ipynb cells 5/6/7."
 }

@@ -47,7 +47,7 @@ export default function Sidebar() {
 
       <div className="border-t border-white/10 px-5 py-4 text-xs text-gray-600">
         <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500">DTX-AI Console</div>
-        <div className="mt-1 text-xs text-gray-600">v0.1.0 — Smart Warehouse</div>
+        <div className="mt-1 text-xs text-gray-600">v2.0 — Smart Warehouse</div>
       </div>
     </aside>
   );

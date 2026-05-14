@@ -1,191 +1,205 @@
-# -*- coding: utf-8 -*-
-"""Data preprocessing utilities for the industrial IoT fault detection model.
+"""Data preprocessing for the Isaac-Sim-style telemetry dataset.
 
-This module loads the local master dataset, performs feature engineering, 
-splits the data into train/test sets, fits and persists a StandardScaler, 
-and provides helpers for preprocessing single records for inference.
+Schema of services/ai/dtx_ai_master_dataset.csv:
+
+    timestamp_s, step_index   <- bookkeeping, dropped as features
+    imu_lin_acc_{x,y,z}       <- linear acceleration
+    imu_ang_vel_{x,y,z}       <- angular velocity
+    vibration_magnitude       <- scalar vibration norm
+    lift_joint_position
+    lift_force_z              <- vertical lift force
+    pseudo_pressure_pa        <- hydraulic line proxy pressure (Pa)
+    drive_joint_velocity
+    drive_joint_effort        <- drive-joint actuator torque
+    lift_joint_velocity
+    roller_{fl,fr,bl,br}_velocity  <- 4 wheel angular velocities
+    power_dissipated_w
+    temperature_c
+    fault_label               <- str: nominal|bearing_wear|overheat|
+                                     overload|pressure_fault|wheel_slip
 """
 
-# preprocessing.py
-
-import pandas as pd
-import numpy as np
-import joblib
 import threading
+
+import joblib
+import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+
+# Canonical class order — also the int code each label maps to via LABEL_TO_INT.
+# Position 0 is the "no anomaly" baseline so runtime code can treat class 0 as
+# nominal without a separate lookup.
+CLASS_NAMES = [
+    "nominal",
+    "bearing_wear",
+    "overheat",
+    "overload",
+    "pressure_fault",
+    "wheel_slip",
+]
+LABEL_TO_INT = {name: idx for idx, name in enumerate(CLASS_NAMES)}
+INT_TO_LABEL = {idx: name for idx, name in enumerate(CLASS_NAMES)}
+
+# Feature columns fed into every model. Order is fixed and persisted to
+# services/ai/ai/models/shared/feature_order.json — the runtime relies on
+# matching positional order to apply the saved scaler.
+FEATURES = [
+    "imu_lin_acc_x",
+    "imu_lin_acc_y",
+    "imu_lin_acc_z",
+    "imu_ang_vel_x",
+    "imu_ang_vel_y",
+    "imu_ang_vel_z",
+    "vibration_magnitude",
+    "lift_joint_position",
+    "lift_force_z",
+    "pseudo_pressure_pa",
+    "drive_joint_velocity",
+    "drive_joint_effort",
+    "lift_joint_velocity",
+    "roller_fl_velocity",
+    "roller_fr_velocity",
+    "roller_bl_velocity",
+    "roller_br_velocity",
+    "power_dissipated_w",
+    "temperature_c",
+]
+
+# Demo holdout. A fixed 20% slice of the full dataset is kept out of every
+# training run (stratified by fault_label, seed=42) so that scripts/run_demo.sh
+# and scripts/replay_dataset_demo.py can replay rows the models have never
+# seen. Training + cross-validation operate exclusively on the remaining 80%
+# pool, and the overall-best model's final test report (services/ai/ai/models/
+# */metadata.json:metrics.test_*) is computed against this holdout — so the
+# test_* numbers reflect honest generalisation, not in-pool resubstitution.
+HOLDOUT_RATIO = 0.2
+HOLDOUT_RANDOM_STATE = 42
 
 
 _scaler_cache: dict = {}
 _scaler_cache_lock = threading.Lock()
 
 
-FEATURES = [
-    'Vibration (mm/s)', 'Temperature (°C)', 'Pressure (bar)',
-    'vib_rolling_mean', 'vib_rolling_std', 'vib_rolling_max',
-    'temp_rolling_mean', 'temp_drift', 'pressure_rolling_mean'
-]
+def load_data(file_name: str = "dtx_ai_master_dataset.csv") -> pd.DataFrame:
+    """Load the dataset and convert the string ``fault_label`` to an int code.
 
+    Returns a DataFrame containing every FEATURES column plus ``fault_label``
+    (int) and ``fault_label_name`` (original string), sorted by ``timestamp_s``.
+    """
+    df = pd.read_csv(file_name)
+    if "fault_label" not in df.columns:
+        raise ValueError("Dataset is missing required column: fault_label")
 
-def load_data(file_name="dtx_ai_master_dataset.csv"):
-    """Loads dataset from local CSV with correct encoding and cleaning."""
-    # encoding='latin1' to handle special characters
-    df = pd.read_csv(file_name, encoding='latin1')
-    
-    # ── FIX: Rename the broken temperature column ──
-    # This maps 'Temperature (ï¿½C)' back to 'Temperature (°C)'
-    rename_dict = {col: 'Temperature (°C)' for col in df.columns if 'Temperature' in col}
-    df = df.rename(columns=rename_dict)
+    df["fault_label_name"] = df["fault_label"].astype(str)
+    df["fault_label"] = df["fault_label_name"].map(LABEL_TO_INT)
+    if df["fault_label"].isna().any():
+        unknown = sorted(set(df.loc[df["fault_label"].isna(), "fault_label_name"]))
+        raise ValueError(
+            f"Dataset contains unknown fault labels not in CLASS_NAMES: {unknown}. "
+            f"Update CLASS_NAMES in services/ai/preprocessing.py if these are real."
+        )
+    df["fault_label"] = df["fault_label"].astype(int)
 
-    #Drop unused columns
-    to_drop = ['Zone', 'RMS Vibration', 'Mean Temp']
-    for col in to_drop:
-        if col in df.columns:
-            df = df.drop(columns=[col])
+    if "timestamp_s" in df.columns:
+        df = df.sort_values("timestamp_s").reset_index(drop=True)
 
-
-    # Parse and sort by timestamp
-    df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-    df = df.sort_values('Timestamp').reset_index(drop=True)
-
-    # Debug: Print actual column names to see the mismatch
-    print("Actual column names:", df.columns.tolist())
+    missing = [c for c in FEATURES if c not in df.columns]
+    if missing:
+        raise ValueError(f"Dataset is missing required feature column(s): {missing}")
 
     return df
 
 
-def engineer_features(df, window=5):
-    """Derives rolling features from raw sensor columns."""
+def split_training_pool_and_holdout(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split the full dataset into an 80% training pool and a 20% demo holdout.
 
-    # Vibration features
-    df['vib_rolling_mean'] = df['Vibration (mm/s)'].rolling(window).mean()
-    df['vib_rolling_std']  = df['Vibration (mm/s)'].rolling(window).std()
-    df['vib_rolling_max']  = df['Vibration (mm/s)'].rolling(window).max()
+    Stratified on ``fault_label`` with a fixed random seed so the holdout is
+    identical for every caller (training script, notebook, demo replay).
+    The training pool index order is preserved for reproducibility.
+    """
+    train_idx, holdout_idx = train_test_split(
+        df.index,
+        test_size=HOLDOUT_RATIO,
+        random_state=HOLDOUT_RANDOM_STATE,
+        stratify=df["fault_label"],
+    )
+    training_pool = df.loc[sorted(train_idx)].reset_index(drop=True)
+    holdout = df.loc[sorted(holdout_idx)].reset_index(drop=True)
+    return training_pool, holdout
 
-    # Temperature features
-    df['temp_rolling_mean'] = df['Temperature (°C)'].rolling(window).mean()
-    df['temp_drift']        = df['Temperature (°C)'].diff(window)
 
-    # Pressure features
-    df['pressure_rolling_mean'] = df['Pressure (bar)'].rolling(window).mean()
+def get_training_pool(df: pd.DataFrame) -> pd.DataFrame:
+    """Convenience: return only the 80% training pool."""
+    return split_training_pool_and_holdout(df)[0]
 
-    # Drop NaN rows produced by rolling calculations
-    df = df.dropna().reset_index(drop=True)
 
+def get_demo_holdout(df: pd.DataFrame) -> pd.DataFrame:
+    """Convenience: return only the 20% demo holdout the models never see."""
+    return split_training_pool_and_holdout(df)[1]
+
+
+def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
+    """No-op for the new 19-channel schema.
+
+    Kept as a stable import point for the notebook and training script; the
+    previous rolling-window feature engineering is no longer needed now that
+    the raw sensor set is rich enough to discriminate the 6 fault classes
+    on its own.
+    """
     return df
 
 
-def split_and_scale(df):
-    """Splits data into train/test sets and applies StandardScaler."""
-
+def split_and_scale(df: pd.DataFrame):
+    """Stratified 80/20 split, scaler fit on train only — no leakage."""
     X = df[FEATURES]
-    y = df['Fault Label']
+    y = df["fault_label"]
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
-        test_size=0.2,
-        random_state=42,
-        stratify=y  # preserves class ratio in both splits
+        X, y, test_size=0.2, random_state=42, stratify=y,
     )
-
-    # Fit scaler only on train data — prevents data leakage into test set
-    scaler = StandardScaler()
-    X_train_scaled = pd.DataFrame(
-        scaler.fit_transform(X_train),
-        columns=FEATURES,
-        index=X_train.index
-    )
-    X_test_scaled = pd.DataFrame(
-        scaler.transform(X_test),
-        columns=FEATURES,
-        index=X_test.index
-    )
-
-    # Save scaler for inference
-    joblib.dump(scaler, 'scaler.pkl')
-
-    return X_train_scaled, X_test_scaled, y_train, y_test
+    scaler = StandardScaler().fit(X_train)
+    X_train_s = pd.DataFrame(scaler.transform(X_train), columns=FEATURES, index=X_train.index)
+    X_test_s = pd.DataFrame(scaler.transform(X_test), columns=FEATURES, index=X_test.index)
+    joblib.dump(scaler, "scaler.pkl")
+    return X_train_s, X_test_s, y_train, y_test
 
 
-def preprocess_single(raw_input: dict, scaler_path='scaler.pkl', window_buffer: list = None):
+def preprocess_single(
+    raw_input: dict,
+    scaler_path: str = "scaler.pkl",
+    window_buffer=None,  # kept for backward signature compat — unused
+):
+    """Transform a single sensor reading dict into a model-ready row.
+
+    ``raw_input`` must contain every key in FEATURES. Returns a (1, len(FEATURES))
+    numpy array after applying the cached StandardScaler.
     """
-    Processes a single incoming data point for live inference.
+    missing = [c for c in FEATURES if c not in raw_input]
+    if missing:
+        raise ValueError(f"Missing required input feature(s): {missing}")
 
-    Args:
-        raw_input:      dict with keys:
-                          'Vibration (mm/s)', 'Temperature (°C)',
-                          'Pressure (bar)', 'Timestamp'
-        scaler_path:    path to saved scaler.pkl
-        window_buffer:  list of last N raw reading dicts (min 5 required).
-                        This function mutates the buffer in place and will
-                        keep only the most recent 5 readings after each call.
+    row = pd.DataFrame([{c: raw_input[c] for c in FEATURES}], columns=FEATURES)
 
-    Returns:
-        X_scaled: np.array ready for model.predict()
-    """
-
-    window_size = 5
-
-    if window_buffer is None:
-        raise ValueError("A window_buffer list must be provided.")
-
-    # 1. Append the new reading first
-    window_buffer.append(raw_input)
-
-    # 2. Keep only the most recent 'window_size' records
-    if len(window_buffer) > window_size:
-        window_buffer[:] = window_buffer[-window_size:]
-
-    # 3. IF BUFFER IS NOT FULL: Return None instead of crashing
-    if len(window_buffer) < window_size:
-        return None
-    
-    # Build DataFrame from buffer
-    df_buffer = pd.DataFrame(window_buffer)
-    df_buffer['Timestamp'] = pd.to_datetime(df_buffer['Timestamp'])
-
-    # Engineer rolling features on buffer
-    df_buffer = engineer_features(df_buffer, window=window_size)
-
-    # Take only the latest row (current reading)
-    latest = df_buffer.iloc[[-1]]
-    X = latest[FEATURES]
-
-    # Load scaler (cached by path to avoid repeated filesystem IO)
     if scaler_path not in _scaler_cache:
         with _scaler_cache_lock:
             if scaler_path not in _scaler_cache:
                 _scaler_cache[scaler_path] = joblib.load(scaler_path)
     scaler = _scaler_cache[scaler_path]
-    X_scaled = scaler.transform(X)
-
-    return X_scaled
+    return scaler.transform(row)
 
 
 def run_preprocessing():
-    """Runs full preprocessing pipeline and saves all outputs."""
-
+    """CLI helper: load + scale + dump to CSV for the notebook."""
     print("Loading data...")
     df = load_data()
-
-    print("Engineering features...")
-    df = engineer_features(df)
-
-    print("Splitting and scaling...")
+    print(f"Loaded {df.shape}, classes: {df['fault_label_name'].value_counts().to_dict()}")
     X_train, X_test, y_train, y_test = split_and_scale(df)
-
-    # Save processed data for model notebooks
-    X_train.to_csv('X_train.csv', index=False)
-    X_test.to_csv('X_test.csv',  index=False)
-    y_train.to_csv('y_train.csv', index=False)
-    y_test.to_csv('y_test.csv',  index=False)
-
-    print("Done.")
-    print(f"  X_train : {X_train.shape}")
-    print(f"  X_test  : {X_test.shape}")
-    print(f"  Classes : {y_train.value_counts().to_dict()}")
-
-    return X_train, X_test, y_train, y_test
+    X_train.to_csv("X_train.csv", index=False)
+    X_test.to_csv("X_test.csv", index=False)
+    y_train.to_csv("y_train.csv", index=False)
+    y_test.to_csv("y_test.csv", index=False)
+    print(f"  X_train: {X_train.shape}")
+    print(f"  X_test:  {X_test.shape}")
 
 
 if __name__ == "__main__":

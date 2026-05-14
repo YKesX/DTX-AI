@@ -1,44 +1,76 @@
-from typing import Dict, List, Any
+"""SHAP-based XAI report builder for the tree-model runtime path."""
+
+from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
 import shap
 
-
+# FEATURES must match preprocessing.FEATURES one-for-one — the runtime
+# explainer aligns SHAP outputs to this order positionally.
 FEATURES = [
-    "Vibration (mm/s)",
-    "Temperature (°C)",
-    "Pressure (bar)",
-    "vib_rolling_mean",
-    "vib_rolling_std",
-    "vib_rolling_max",
-    "temp_rolling_mean",
-    "temp_drift",
-    "pressure_rolling_mean",
+    "imu_lin_acc_x",
+    "imu_lin_acc_y",
+    "imu_lin_acc_z",
+    "imu_ang_vel_x",
+    "imu_ang_vel_y",
+    "imu_ang_vel_z",
+    "vibration_magnitude",
+    "lift_joint_position",
+    "lift_force_z",
+    "pseudo_pressure_pa",
+    "drive_joint_velocity",
+    "drive_joint_effort",
+    "lift_joint_velocity",
+    "roller_fl_velocity",
+    "roller_fr_velocity",
+    "roller_bl_velocity",
+    "roller_br_velocity",
+    "power_dissipated_w",
+    "temperature_c",
 ]
 
-CLASS_DISPLAY_MAP = {
-    "no_fault": "Normal",
-    "bearing_fault": "Vibration Anomaly",
-    "overheating": "Temperature Anomaly",
-}
-
+# Canonical class string → SHAP class index. Order matches
+# preprocessing.CLASS_NAMES so model output and explainer agree.
 CLASS_INDEX_MAP = {
-    "no_fault": 0,
-    "bearing_fault": 1,
-    "overheating": 2,
+    "nominal": 0,
+    "bearing_wear": 1,
+    "overheat": 2,
+    "overload": 3,
+    "pressure_fault": 4,
+    "wheel_slip": 5,
 }
 
+CLASS_DISPLAY_MAP = {
+    "nominal": "Nominal",
+    "bearing_wear": "Bearing Wear",
+    "overheat": "Overheat",
+    "overload": "Overload",
+    "pressure_fault": "Pressure Fault",
+    "wheel_slip": "Wheel Slip",
+}
+
+# Human-readable feature names for the operator-facing summary text.
 FEATURE_DISPLAY_MAP = {
-    "Vibration (mm/s)": "current vibration",
-    "Temperature (°C)": "current temperature",
-    "Pressure (bar)": "current pressure",
-    "vib_rolling_mean": "average vibration",
-    "vib_rolling_std": "vibration fluctuation",
-    "vib_rolling_max": "peak vibration",
-    "temp_rolling_mean": "average temperature",
-    "temp_drift": "temperature drift",
-    "pressure_rolling_mean": "average pressure",
+    "imu_lin_acc_x": "linear accel X",
+    "imu_lin_acc_y": "linear accel Y",
+    "imu_lin_acc_z": "linear accel Z",
+    "imu_ang_vel_x": "angular velocity X",
+    "imu_ang_vel_y": "angular velocity Y",
+    "imu_ang_vel_z": "angular velocity Z",
+    "vibration_magnitude": "vibration magnitude",
+    "lift_joint_position": "lift joint position",
+    "lift_force_z": "vertical lift force",
+    "pseudo_pressure_pa": "hydraulic pressure",
+    "drive_joint_velocity": "drive velocity",
+    "drive_joint_effort": "drive effort",
+    "lift_joint_velocity": "lift velocity",
+    "roller_fl_velocity": "front-left roller",
+    "roller_fr_velocity": "front-right roller",
+    "roller_bl_velocity": "back-left roller",
+    "roller_br_velocity": "back-right roller",
+    "power_dissipated_w": "power dissipation",
+    "temperature_c": "temperature",
 }
 
 
@@ -47,7 +79,7 @@ def _format_feature_name(feature_name: str) -> str:
 
 
 def _get_severity(anomaly_class: str, anomaly_score: float) -> str:
-    if anomaly_class == "no_fault":
+    if anomaly_class == "nominal":
         return "info"
     if anomaly_score >= 0.85:
         return "critical"
@@ -57,45 +89,32 @@ def _get_severity(anomaly_class: str, anomaly_score: float) -> str:
 
 
 def _build_input_dataframe(input_features: Dict[str, Any]) -> pd.DataFrame:
-    missing = [feature for feature in FEATURES if feature not in input_features]
+    missing = [f for f in FEATURES if f not in input_features]
     if missing:
         raise ValueError(f"Missing required input feature(s): {missing}")
-
-    row = {feature: input_features[feature] for feature in FEATURES}
+    row = {f: input_features[f] for f in FEATURES}
     return pd.DataFrame([row], columns=FEATURES)
 
 
 def _extract_class_shap_values(shap_output: Any, class_idx: int) -> np.ndarray:
-    """
-    Handles different SHAP output formats for tree-based models.
-    Returns 1D SHAP values for the selected class and single sample.
-    """
+    """Handle the various SHAP output shapes (list / 2-D / 3-D)."""
     values = shap_output.values if hasattr(shap_output, "values") else shap_output
 
     if isinstance(values, list):
-        class_values = np.asarray(values[class_idx])[0]
-        return np.abs(class_values)
+        return np.abs(np.asarray(values[class_idx])[0])
 
     values = np.asarray(values)
-
     if values.ndim == 3:
-        if values.shape[2] == len(CLASS_INDEX_MAP):
-            class_values = values[0, :, class_idx]
-            return np.abs(class_values)
-
-        if values.shape[1] == len(CLASS_INDEX_MAP):
-            class_values = values[0, class_idx, :]
-            return np.abs(class_values)
-
+        n_classes = len(CLASS_INDEX_MAP)
+        if values.shape[2] == n_classes:
+            return np.abs(values[0, :, class_idx])
+        if values.shape[1] == n_classes:
+            return np.abs(values[0, class_idx, :])
         raise ValueError(f"Unsupported 3D SHAP output shape: {values.shape}")
-
     if values.ndim == 2:
-        class_values = values[0]
-        return np.abs(class_values)
-
+        return np.abs(values[0])
     if values.ndim == 1:
         return np.abs(values)
-
     raise ValueError(f"Unsupported SHAP output shape: {values.shape}")
 
 
@@ -105,9 +124,7 @@ def _compute_top_features(
     anomaly_class: str,
     top_k: int = 3,
 ) -> List[Dict[str, Any]]:
-    # input_features are already scaled by the inference pipeline
     X_scaled_df = _build_input_dataframe(input_features)
-
     explainer = shap.TreeExplainer(model)
     shap_output = explainer.shap_values(X_scaled_df)
 
@@ -115,19 +132,14 @@ def _compute_top_features(
     shap_values_for_class = _extract_class_shap_values(shap_output, class_idx)
 
     top_indices = np.argsort(shap_values_for_class)[-top_k:][::-1]
-
-    top_features = []
-    for idx in top_indices:
-        feature_name = FEATURES[idx]
-        top_features.append(
-            {
-                "feature": feature_name,
-                "display_name": _format_feature_name(feature_name),
-                "shap_value": round(float(shap_values_for_class[idx]), 4),
-            }
-        )
-
-    return top_features
+    return [
+        {
+            "feature": FEATURES[idx],
+            "display_name": _format_feature_name(FEATURES[idx]),
+            "shap_value": round(float(shap_values_for_class[idx]), 4),
+        }
+        for idx in top_indices
+    ]
 
 
 def _build_explanation_text(
@@ -135,73 +147,39 @@ def _build_explanation_text(
     anomaly_score: float,
     top_features: List[Dict[str, Any]],
 ) -> str:
-    confidence_pct = int(round(anomaly_score * 100))
-    readable_features = [
-        item.get(
-            "display_name", _format_feature_name(item.get("feature", "unknown_feature"))
-        )
-        for item in top_features
-    ]
-    feature_text = (
-        ", ".join(readable_features) if readable_features else "sensor patterns"
-    )
-
-    if anomaly_class == "no_fault":
+    if anomaly_class == "nominal":
         return "Status: System is operating normally. No anomalies detected."
 
-    if anomaly_class == "bearing_fault":
-        return (
-            f"Critical Warning: Vibration Anomaly detected with "
-            f"{confidence_pct}% confidence. Primary contributing factors: {feature_text}."
-        )
+    confidence_pct = int(round(anomaly_score * 100))
+    readable = [
+        item.get("display_name", _format_feature_name(item.get("feature", "?")))
+        for item in top_features
+    ]
+    feature_text = ", ".join(readable) if readable else "sensor patterns"
 
-    if anomaly_class == "overheating":
-        return (
-            f"Alert: Temperature Anomaly detected with "
-            f"{confidence_pct}% confidence. Primary contributing factors: {feature_text}."
-        )
-
+    display_label = CLASS_DISPLAY_MAP.get(anomaly_class, anomaly_class)
+    severity_word = (
+        "Critical Warning"
+        if anomaly_class in {"overheat"}
+        else "Alert"
+    )
     return (
-        f"Warning: An anomaly was detected with {confidence_pct}% confidence. "
-        f"Primary contributing factors: {feature_text}."
+        f"{severity_word}: {display_label} detected with "
+        f"{confidence_pct}% confidence. Primary contributing factors: {feature_text}."
     )
 
 
 def generate_xai_report(model: Any, live_json: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Generates SHAP-based top feature explanations from model and live input.
-
-    Expected input schema:
-    {
-        "timestamp": "2026-03-25T02:15:00",
-        "anomaly_class": "bearing_fault",
-        "anomaly_score": 0.87,
-        "input_features": {
-            "Vibration (mm/s)": ...,
-            "Temperature (°C)": ...,
-            "Pressure (bar)": ...,
-            "vib_rolling_mean": ...,
-            "vib_rolling_std": ...,
-            "vib_rolling_max": ...,
-            "temp_rolling_mean": ...,
-            "temp_drift": ...,
-            "pressure_rolling_mean": ...
-        }
-    }
-
-    Note:
-    - input_features are expected to be the final scaled feature values
-      produced by the inference pipeline.
-    """
+    """Build a SHAP-backed explanation report for a single tree-model prediction."""
     timestamp = live_json.get("timestamp")
-    anomaly_class = live_json.get("anomaly_class", "no_fault")
+    anomaly_class = live_json.get("anomaly_class", "nominal")
     anomaly_score = float(live_json.get("anomaly_score", 0.0))
     input_features = live_json.get("input_features", {})
 
     severity = _get_severity(anomaly_class, anomaly_score)
 
-    if anomaly_class == "no_fault":
-        top_features = []
+    if anomaly_class == "nominal":
+        top_features: List[Dict[str, Any]] = []
     else:
         top_features = _compute_top_features(
             model=model,
@@ -210,12 +188,6 @@ def generate_xai_report(model: Any, live_json: Dict[str, Any]) -> Dict[str, Any]
             top_k=3,
         )
 
-    explanation_text = _build_explanation_text(
-        anomaly_class=anomaly_class,
-        anomaly_score=anomaly_score,
-        top_features=top_features,
-    )
-
     return {
         "timestamp": timestamp,
         "anomaly_class": anomaly_class,
@@ -223,5 +195,5 @@ def generate_xai_report(model: Any, live_json: Dict[str, Any]) -> Dict[str, Any]
         "anomaly_score": anomaly_score,
         "severity": severity,
         "top_features": top_features,
-        "explanation_text": explanation_text,
+        "explanation_text": _build_explanation_text(anomaly_class, anomaly_score, top_features),
     }

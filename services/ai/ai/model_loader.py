@@ -93,33 +93,28 @@ def _build_unavailable(model_key: str, family: str, reason: str, feature_order: 
 def _load_lstm_runtime_model(model_path: Path, metadata: dict[str, Any]) -> Any:
     try:
         import torch
-        import torch.nn as nn
     except Exception as exc:  # pragma: no cover - dependency optional
         raise RuntimeError(f"PyTorch unavailable: {exc}") from exc
 
+    from ai.lstm_classifier import LSTMAutoencoderClassifier
+
     feature_dim = int(metadata.get("feature_count", DEFAULT_FEATURE_COUNT))
+    num_classes = int(metadata.get("num_classes", len(metadata.get("class_mapping", {})) or 2))
     params = metadata.get("best_params", {})
     hidden = int(params.get("hidden", 64))
     latent = int(params.get("latent", 8))
 
-    class LSTMAutoencoder(nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.encoder = nn.LSTM(feature_dim, hidden, batch_first=True)
-            self.encoder_latent = nn.Linear(hidden, latent)
-            self.decoder_input = nn.Linear(latent, hidden)
-            self.decoder = nn.LSTM(hidden, feature_dim, batch_first=True)
-
-        def forward(self, x):
-            encoded, _ = self.encoder(x)
-            latent_vec = self.encoder_latent(encoded)
-            decoded_in = self.decoder_input(latent_vec)
-            reconstructed, _ = self.decoder(decoded_in)
-            return reconstructed
-
-    model = LSTMAutoencoder()
+    model = LSTMAutoencoderClassifier(
+        input_dim=feature_dim,
+        hidden_dim=hidden,
+        latent_dim=latent,
+        num_classes=num_classes,
+    )
     state_dict = torch.load(model_path, map_location="cpu")
-    model.load_state_dict(state_dict, strict=False)
+    # strict=True so a stale checkpoint (e.g. trained against a different
+    # architecture or num_classes) fails loudly instead of silently loading
+    # half the weights and leaving the classifier head random.
+    model.load_state_dict(state_dict, strict=True)
     model.eval()
     return model
 

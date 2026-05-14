@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Replay held-out dataset rows through POST /events for validation demo mode."""
+"""Replay held-out dataset rows through ``POST /events/`` for validation demos.
+
+The dataset is sorted chronologically by ``timestamp_s``; we take the tail 20%
+as the held-out test split and POST one row at a time, stamping each event
+with replay metadata so the API can compute live ground-truth-vs-prediction
+accuracy.
+"""
 
 from __future__ import annotations
 
@@ -9,8 +15,8 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from socket import timeout as SocketTimeout
 from pathlib import Path
+from socket import timeout as SocketTimeout
 from typing import Any
 
 import pandas as pd
@@ -20,38 +26,71 @@ ai_path = str(REPO_ROOT / "services" / "ai")
 if ai_path not in sys.path:
     sys.path.insert(0, ai_path)
 
-# Verify the preprocessing module exists before importing
-preprocessing_file = Path(ai_path) / "preprocessing.py"
-if not preprocessing_file.exists():
-    raise ImportError(f"preprocessing module not found at {preprocessing_file}")
-
-from preprocessing import engineer_features, load_data  # noqa: E402
+from preprocessing import (  # noqa: E402
+    CLASS_NAMES,
+    FEATURES,
+    LABEL_TO_INT,
+    get_demo_holdout,
+    load_data,
+)
 
 try:
     from ai.model_loader import load_runtime_model
 except Exception:  # pragma: no cover - optional preflight dependency
-    load_runtime_model = None
-
-
-LABEL_MAP = {
-    "0": "no_fault",
-    "1": "bearing_fault",
-    "2": "overheating",
-    0: "no_fault",
-    1: "bearing_fault",
-    2: "overheating",
-    "no_fault": "no_fault",
-    "bearing_fault": "bearing_fault",
-    "overheating": "overheating",
-    "normal": "no_fault",
-}
+    load_runtime_model = None  # type: ignore[assignment]
 
 
 def normalize_label(value: Any) -> str:
+    """Translate numeric/string ground-truth labels to a canonical class name."""
     raw = str(value).strip().lower()
-    return LABEL_MAP.get(raw, raw)
+    if raw in LABEL_TO_INT:
+        return raw
+    if raw.isdigit() and 0 <= int(raw) < len(CLASS_NAMES):
+        return CLASS_NAMES[int(raw)]
+    return raw
 
 
+def prepare_replay_rows(
+    split: str = "holdout",
+    limit: int | None = None,
+    *,
+    shuffle: bool = True,
+    shuffle_seed: int = 0,
+) -> pd.DataFrame:
+    """Pick the rows to replay through ``POST /events/``.
+
+    The default split is ``holdout`` — the canonical 20% demo-holdout slice
+    that ``scripts/train_models.py`` excludes from every training run. That
+    means a fresh demo only ever shows the dashboard predictions on data the
+    models have never seen.
+
+    ``shuffle`` is on by default so a small ``--limit`` covers all 6 fault
+    classes instead of a single contiguous block (the underlying CSV is
+    sorted by class). ``shuffle_seed=0`` re-shuffles every invocation; pass
+    a fixed integer for reproducible demos.
+    """
+    raw_df = load_data(str(REPO_ROOT / "services" / "ai" / "dtx_ai_master_dataset.csv"))
+    raw_df["_source_row_id"] = raw_df.index.astype(int)
+
+    if split == "holdout":
+        split_df = get_demo_holdout(raw_df)
+    elif split == "all":
+        split_df = raw_df.copy().reset_index(drop=True)
+    else:
+        raise ValueError(f"Unsupported split '{split}'. Use 'holdout' or 'all'.")
+
+    if shuffle:
+        seed = None if shuffle_seed == 0 else shuffle_seed
+        split_df = split_df.sample(frac=1.0, random_state=seed).reset_index(drop=True)
+
+    if limit is not None:
+        split_df = split_df.iloc[: max(limit, 0)].copy()
+    return split_df
+
+
+# Backwards-compat shim — kept so the smoke test can import the helper, but
+# no longer used by the demo itself. Callers should prefer
+# ``preprocessing.split_training_pool_and_holdout`` for the canonical split.
 def chronological_split(df: pd.DataFrame, test_ratio: float = 0.2) -> dict[str, pd.DataFrame]:
     if df.empty:
         return {"train": df.copy(), "test": df.copy(), "all": df.copy()}
@@ -62,82 +101,39 @@ def chronological_split(df: pd.DataFrame, test_ratio: float = 0.2) -> dict[str, 
     return {"train": train, "test": test, "all": df.copy().reset_index(drop=True)}
 
 
-def prepare_replay_rows(source: str = "ziya", split: str = "test", limit: int | None = None) -> pd.DataFrame:
-    if source != "ziya":
-        raise ValueError(f"Unsupported source '{source}'. Only 'ziya' is currently supported.")
-
-    raw_df = load_data().copy()
-    raw_df["_source_row_id"] = raw_df.index.astype(int)
-    feat_df = engineer_features(raw_df, window=5)
-
-    if "Fault Label" not in feat_df.columns:
-        raise ValueError("Dataset is missing required column: Fault Label")
-
-    split_df = chronological_split(feat_df).get(split)
-    if split_df is None:
-        raise ValueError(f"Unsupported split '{split}'. Use train, test, or all.")
-
-    split_df = split_df.sort_values("Timestamp").reset_index(drop=True)
-    if limit is not None:
-        split_df = split_df.iloc[: max(limit, 0)].copy()
-    return split_df
-
-
-def _value(row: pd.Series, candidates: list[str], default: Any = None) -> Any:
-    for name in candidates:
-        if name in row and pd.notna(row[name]):
-            return row[name]
-    return default
-
-
 def build_event_payload(
     row: pd.Series,
     *,
     replay_index: int,
     split: str,
-    source: str,
     model: str,
     strict: bool,
 ) -> dict[str, Any]:
-    ground_truth_raw = row.get("Fault Label")
-    ground_truth_name = normalize_label(ground_truth_raw)
+    """Build a ``POST /events/`` payload from one dataset row."""
+    ground_truth_int = int(row["fault_label"])
+    ground_truth_name = CLASS_NAMES[ground_truth_int] if 0 <= ground_truth_int < len(CLASS_NAMES) else "unknown"
 
-    asset = _value(row, ["Machine ID", "Asset ID", "asset_id"], default="dataset-machine")
-    zone = _value(row, ["Warehouse Section", "Zone", "zone_id"], default="dataset-zone")
-
-    vibration = float(_value(row, ["Vibration (mm/s)", "vibration"], default=0.0))
-    temperature = float(_value(row, ["Temperature (°C)", "temperature"], default=0.0))
-    pressure = float(_value(row, ["Pressure (bar)", "pressure"], default=0.0))
-
-    humidity_value = _value(row, ["Humidity (%)", "humidity"], default=None)
-    humidity = float(humidity_value) if humidity_value is not None else None
-
-    timestamp = row.get("Timestamp")
-    if hasattr(timestamp, "isoformat"):
-        timestamp = timestamp.isoformat()
-    else:
-        timestamp = str(timestamp)
-
-    return {
-        "asset_id": str(asset),
-        "zone_id": str(zone),
-        "timestamp": timestamp,
-        "vibration": vibration,
-        "temperature": temperature,
-        "humidity": humidity,
-        "pressure": pressure,
-        "metadata": {
-            "source": "dataset_replay",
-            "dataset": source,
-            "row_id": int(row.get("_source_row_id", replay_index - 1)),
-            "replay_index": replay_index,
-            "split": split,
-            "ground_truth_label": str(ground_truth_raw),
-            "ground_truth_name": ground_truth_name,
-            "active_model": model,
-            "replay_strict": bool(strict),
-        },
+    payload: dict[str, Any] = {
+        "asset_id": f"isaac-asset-{row.get('_source_row_id', replay_index)}",
+        "zone_id": "isaac-zone",
+        "timestamp": pd.Timestamp.now(tz="UTC").isoformat(),
     }
+    for feature in FEATURES:
+        if feature in row and pd.notna(row[feature]):
+            payload[feature] = float(row[feature])
+
+    payload["metadata"] = {
+        "source": "dataset_replay",
+        "dataset": "dtx_ai_master_dataset",
+        "row_id": int(row.get("_source_row_id", replay_index - 1)),
+        "replay_index": replay_index,
+        "split": split,
+        "ground_truth_label": str(ground_truth_int),
+        "ground_truth_name": ground_truth_name,
+        "active_model": model,
+        "replay_strict": bool(strict),
+    }
+    return payload
 
 
 def post_event(base_url: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -160,7 +156,6 @@ def wait_for_api(base_url: str, timeout_sec: float = 20.0) -> None:
     deadline = time.time() + max(timeout_sec, 0.0)
     health_url = f"{base_url}/health"
     last_err = "unknown"
-
     while time.time() < deadline:
         try:
             with urllib.request.urlopen(health_url, timeout=2) as resp:
@@ -170,94 +165,88 @@ def wait_for_api(base_url: str, timeout_sec: float = 20.0) -> None:
         except (urllib.error.URLError, SocketTimeout) as exc:
             last_err = f"{type(exc).__name__}: {exc}"
         time.sleep(0.5)
-
     raise RuntimeError(
         f"API is not reachable at {health_url}. "
-        f"Start backend first (e.g. bash scripts/run_dev.sh). Last error: {last_err}"
+        f"Start backend first (bash scripts/run_dev.sh). Last error: {last_err}"
     )
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Replay dataset rows through the real DTX-AI API path.")
-    parser.add_argument("--url", default="http://localhost:8000", help="API base URL")
-    parser.add_argument("--model", default="lightgbm", help="Active model key to request")
-    parser.add_argument("--split", default="test", choices=["train", "test", "all"], help="Replay split")
-    parser.add_argument("--limit", type=int, default=100, help="Maximum rows to replay")
-    parser.add_argument("--delay", type=float, default=0.5, help="Delay between requests (seconds)")
-    parser.add_argument("--source", default="ziya", help="Dataset source identifier")
-    parser.add_argument("--strict", action="store_true", help="Enable strict real-model replay validation")
+    parser = argparse.ArgumentParser(description="Replay dataset rows through the DTX-AI API.")
+    parser.add_argument("--url", default="http://localhost:8000")
+    parser.add_argument("--model", default="lightgbm")
     parser.add_argument(
-        "--wait-timeout",
-        type=float,
-        default=20.0,
-        help="Seconds to wait for API /health before replay starts",
+        "--split", default="holdout", choices=["holdout", "all"],
+        help="'holdout' (default) replays only the demo holdout — rows no model has seen; "
+             "'all' replays the entire dataset including rows used in training.",
     )
+    parser.add_argument("--limit", type=int, default=100)
+    parser.add_argument("--delay", type=float, default=0.5)
+    parser.add_argument(
+        "--no-shuffle", action="store_true",
+        help="Replay rows in dataset order (default is to shuffle so a small "
+             "--limit shows every fault class instead of a single contiguous block).",
+    )
+    parser.add_argument(
+        "--shuffle-seed", type=int, default=0,
+        help="Fixed shuffle seed for reproducible demos (default 0 = re-shuffle every run).",
+    )
+    parser.add_argument("--strict", action="store_true")
+    parser.add_argument("--wait-timeout", type=float, default=20.0)
     return parser.parse_args()
 
 
 def preflight_requested_model(model_key: str, strict: bool) -> None:
     if load_runtime_model is None:
-        print(
-            "Warning: local model preflight unavailable; could not import ai.model_loader.",
-            file=sys.stderr,
-        )
+        print("Warning: ai.model_loader unavailable; skipping preflight.", file=sys.stderr)
         return
-
     runtime = load_runtime_model(requested_model=model_key, strict_selection=True)
     if runtime.available:
         print(f"Model preflight OK: requested={model_key} runtime={runtime.key}")
         return
-
-    message = (
-        f"Requested model '{model_key}' is unavailable in current environment. "
-        f"Reason: {runtime.reason}"
-    )
+    message = f"Requested model '{model_key}' is unavailable. Reason: {runtime.reason}"
     if strict:
         raise RuntimeError(message)
-
     print(
-        f"Warning: {message}\n"
-        "Replay may fallback to another model (often random_forest). "
-        "Use --strict to fail fast.",
+        f"Warning: {message}\nReplay may fall back to another model. Use --strict to fail fast.",
         file=sys.stderr,
     )
 
 
 def main() -> None:
     args = parse_args()
-
     try:
         preflight_requested_model(args.model, args.strict)
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(3)
-
     try:
         wait_for_api(args.url, timeout_sec=args.wait_timeout)
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         sys.exit(2)
 
-    rows = prepare_replay_rows(source=args.source, split=args.split, limit=args.limit)
+    rows = prepare_replay_rows(
+        split=args.split,
+        limit=args.limit,
+        shuffle=not args.no_shuffle,
+        shuffle_seed=args.shuffle_seed,
+    )
     if rows.empty:
-        print("No rows available for replay with current split/limit.", file=sys.stderr)
+        print("No rows available for replay.", file=sys.stderr)
         sys.exit(1)
 
+    class_dist = rows["fault_label"].value_counts().sort_index().to_dict()
     print(
-        f"Dataset replay started: source={args.source} split={args.split} "
-        f"rows={len(rows)} model={args.model} strict={int(args.strict)}"
+        f"Dataset replay: split={args.split} rows={len(rows)} model={args.model} "
+        f"strict={int(args.strict)} shuffle={int(not args.no_shuffle)} "
+        f"class_distribution={class_dist}"
     )
 
-    ok = 0
-    failed = 0
+    ok = failed = 0
     for i, (_, row) in enumerate(rows.iterrows(), start=1):
         payload = build_event_payload(
-            row,
-            replay_index=i,
-            split=args.split,
-            source=args.source,
-            model=args.model,
-            strict=args.strict,
+            row, replay_index=i, split=args.split, model=args.model, strict=args.strict,
         )
         try:
             response = post_event(args.url, payload)
@@ -269,8 +258,8 @@ def main() -> None:
             score = (response.get("anomaly") or {}).get("anomaly_score", 0.0)
             ok += 1
             print(
-                f"[{i:>4}/{len(rows)}] model={runtime_model:<14} gt={gt:<14} "
-                f"pred={pred:<14} score={float(score):.4f} correct={correct}"
+                f"[{i:>4}/{len(rows)}] model={runtime_model:<14} gt={gt:<16} "
+                f"pred={pred:<16} score={float(score):.4f} correct={correct}"
             )
         except urllib.error.HTTPError as exc:
             failed += 1
@@ -290,11 +279,10 @@ def main() -> None:
     metrics = fetch_live_metrics(args.url)
     print("-" * 72)
     print(
-        "Replay complete "
-        f"ok={ok} failed={failed} total_replayed={metrics.get('total_replayed', 0)} "
+        f"Replay complete  ok={ok}  failed={failed}  "
+        f"total_replayed={metrics.get('total_replayed', 0)}  "
         f"running_accuracy={metrics.get('running_accuracy', 0.0):.4f}"
     )
-
     if failed:
         sys.exit(1)
 

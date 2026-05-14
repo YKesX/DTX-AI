@@ -261,10 +261,12 @@ async def fetch_asset_timeline(asset_id: str, limit: int = 50) -> list[dict[str,
             {
                 "event_id": row["event_id"],
                 "timestamp": row["timestamp"],
-                "vibration": payload.get("vibration"),
-                "temperature": payload.get("temperature"),
-                "humidity": payload.get("humidity"),
-                "pressure": payload.get("pressure"),
+                # Surface the 4 most operator-relevant channels in the
+                # drilldown timeline; full payload is still in raw_payload.
+                "vibration_magnitude": payload.get("vibration_magnitude"),
+                "temperature_c": payload.get("temperature_c"),
+                "pseudo_pressure_pa": payload.get("pseudo_pressure_pa"),
+                "power_dissipated_w": payload.get("power_dissipated_w"),
                 "anomaly_score": row["anomaly_score"],
                 "severity": row["severity"],
                 "predicted_label": metadata.get("predicted_label"),

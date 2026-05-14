@@ -8,16 +8,16 @@ sidebar_position: 4
 
 ## apps/api — FastAPI Backend
 
-Central coordination hub. Accepts sensor events, orchestrates the AI pipeline, persists results to SQLite, broadcasts alerts to the dashboard via WebSocket.
+Central coordination hub. Accepts sensor frames, orchestrates the AI pipeline, persists results to SQLite, broadcasts alerts to the dashboard via WebSocket.
 
 - **Entry point:** `uvicorn main:app --reload --port 8000`
 - **Port:** HTTP + WebSocket on `:8000`
 
 **Responsibilities:**
-- Validate and accept `EventIn` payloads at `POST /events/`
+- Validate and accept 19-channel `EventIn` payloads at `POST /events/`
 - Lazy-import and call `services/ai` → `run_pipeline(event)`
 - Write `EventLog` + `event_actions` rows to SQLite asynchronously
-- Update `LiveReplayMetrics` in-memory when `source=dataset_replay`
+- Update `LiveReplayMetrics` in-memory when `metadata.source = "dataset_replay"`
 - Broadcast `DashboardAlert` JSON to all WebSocket clients
 - Fire-and-forget `TwinUpdate` to the Isaac Sim adapter
 - Serve alert history, operator actions, asset drilldown, live metrics
@@ -32,13 +32,14 @@ All ML inference and explainability logic. Not a network service — a single as
 - **Transport:** Direct Python import via `PYTHONPATH`
 
 **Responsibilities:**
-- Load active model from registry on first call (cached in-process)
-- Build 5-event rolling window feature vector per `asset:zone` key
-- Run inference: LightGBM / XGBoost / Random Forest / LSTM-AE
+- Load active model from `model_registry.json` on first call (cached in-process)
+- Extract the 19 sensor channels from `EventIn` and scale them with `scaler.pkl`
+- Run inference: LightGBM / XGBoost / Random Forest / LSTM-AE+CLS
 - Merge model output with rule-based guardrails (non-strict mode)
 - Generate SHAP feature attribution via `xai_explainer.py`
-- Fall back gracefully to rule-based detection when models fail
+- Fall back gracefully to the rule-based detector when models fail
 - Support strict replay mode (`DTX_REPLAY_STRICT=1`)
+- Expose architecture in `ai/lstm_classifier.py` so the training notebook and the runtime always agree on `state_dict` keys
 
 ---
 
@@ -47,7 +48,7 @@ All ML inference and explainability logic. Not a network service — a single as
 Operator-facing real-time control panel.
 
 - **Entry point:** `npm run dev` → Vite dev server on `:5173`
-- **Communicates to API:** via `VITE_API_BASE_URL` (HTTP) + `VITE_WS_URL` (WebSocket)
+- **Communicates with API** via `VITE_API_BASE_URL` (HTTP) + `VITE_WS_URL` (WebSocket)
 
 **Responsibilities:**
 - Live event list from WebSocket + REST initial load
@@ -59,15 +60,14 @@ Operator-facing real-time control panel.
 
 ---
 
-## apps/sim — Isaac Sim Adapter *(stub)*
+## apps/sim — Isaac Sim Adapter
 
 Bridge between the DTX-AI API and NVIDIA Isaac Sim 4.x.
 
 - **Entry point:** `sim/adapter.py::notify(update: TwinUpdate)` — called fire-and-forget from the API
-- **Status:** Logging stub only. No real USD/Omniverse calls are made.
-- When `ISAAC_SIM_ENABLED=false` (default): logs the update and returns
+- **Status:** Logging stub. When `ISAAC_SIM_ENABLED=true` it calls into `sim.scene.update_asset_status`, which is itself a placeholder. The Isaac Sim team owns the implementation — see [docs/isaac_sim_integration.md](https://github.com/YKesX/DTX-AI/blob/main/docs/isaac_sim_integration.md).
 
-All `ImportError` and runtime failures from the sim adapter are silently suppressed to ensure the Isaac Sim stub never blocks event processing.
+All `ImportError`s and runtime failures from the sim adapter are silently suppressed so a missing or down sim never blocks event processing.
 
 ---
 
@@ -75,7 +75,7 @@ All `ImportError` and runtime failures from the sim adapter are silently suppres
 
 Single source of truth for all inter-service data contracts.
 
-- **Package:** `dtx-ai-shared` v0.1.0 (installed via `pip install -e packages/shared`)
-- **Contents:** All Pydantic v2 schemas — `EventIn`, `AnomalyResult`, `ExplanationResult`, `DashboardAlert`, `TwinUpdate`, `EventLog`, `AlertActionIn`, `AlertActionRecord`
+- **Package:** `dtx-ai-shared` (installed via `pip install -e packages/shared`)
+- **Contents:** All Pydantic v2 schemas — `EventIn`, `AnomalyResult`, `ExplanationResult`, `DashboardAlert`, `TwinUpdate`, `EventLog`, `AlertActionIn`, `AlertActionRecord`, `AssetTimelinePoint`, `AssetTimelineResponse`
 
-See [Data Models](/docs/data-models) for full schema reference.
+See [Data Models](/docs/data-models) for the full schema reference.

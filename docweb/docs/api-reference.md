@@ -21,13 +21,13 @@ Liveness check.
 
 **Response 200:**
 ```json
-{ "status": "ok", "timestamp": "2026-04-10T12:00:00Z" }
+{ "status": "ok", "timestamp": "2026-05-14T12:00:00Z" }
 ```
 
 ---
 
 ### `POST /events/`
-Main ingestion route. Accepts a sensor event, runs the full AI pipeline, persists to SQLite, broadcasts over WebSocket.
+Main ingestion route. Accepts a 19-channel telemetry frame, runs the AI pipeline, persists to SQLite, broadcasts over WebSocket.
 
 **Request body:** [`EventIn`](/docs/data-models#eventin)
 
@@ -37,12 +37,24 @@ Main ingestion route. Accepts a sensor event, runs the full AI pipeline, persist
 curl -X POST http://localhost:8000/events/ \
   -H "Content-Type: application/json" \
   -d '{
-    "asset_id": "conveyor-belt-01",
+    "asset_id": "forklift-01",
     "zone_id": "zone-A",
-    "vibration": 14.7,
-    "temperature": 82.3
+    "imu_lin_acc_x": -9.77, "imu_lin_acc_y": 0.0, "imu_lin_acc_z": 0.86,
+    "imu_ang_vel_x":  0.0,  "imu_ang_vel_y": 0.0, "imu_ang_vel_z": 0.0,
+    "vibration_magnitude": 9.82,
+    "lift_joint_position": -0.15, "lift_force_z": -0.44,
+    "lift_joint_velocity": 0.0,
+    "pseudo_pressure_pa": -5.56,
+    "drive_joint_velocity": 0.0,  "drive_joint_effort": 2812.0,
+    "roller_fl_velocity": 0.01,   "roller_fr_velocity": 0.0,
+    "roller_bl_velocity": 0.01,   "roller_br_velocity": 0.0,
+    "power_dissipated_w": 299.0,
+    "temperature_c": 27.2,
+    "metadata": { "source": "isaac_sim", "active_model": "lightgbm" }
   }'
 ```
+
+The example above is a `bearing_wear` profile drawn from per-class training-data means. See [Data Models](/docs/data-models) for the full field list and units.
 
 ---
 
@@ -68,7 +80,12 @@ Action history + derived operator state for a single alert.
 ```json
 {
   "event_id": "uuid",
-  "state": { "status": "assigned", "assignee": "Hakkı" },
+  "state": {
+    "operator_status": "assigned",
+    "assigned_to": "Hakki",
+    "last_action": "assign",
+    "last_action_at": "2026-05-14T12:05:00Z"
+  },
   "actions": [ /* AlertActionRecord[] */ ]
 }
 ```
@@ -82,7 +99,23 @@ Create an operator action on an alert.
 
 **Response 201:**
 ```json
-{ "event_id": "uuid", "action": "assign", "state": { ... } }
+{
+  "event_id": "uuid",
+  "action": {
+    "id": 12,
+    "event_id": "uuid",
+    "action_type": "assign",
+    "note": "Assign to shift lead",
+    "assignee": "Hakki",
+    "created_at": "2026-05-14T12:05:00Z"
+  },
+  "state": {
+    "operator_status": "assigned",
+    "assigned_to": "Hakki",
+    "last_action": "assign",
+    "last_action_at": "2026-05-14T12:05:00Z"
+  }
+}
 ```
 
 ---
@@ -98,11 +131,11 @@ Delete all events + operator actions from SQLite. Resets `LiveReplayMetrics`.
 ---
 
 ### `GET /assets/{asset_id}/timeline`
-Per-asset sensor history, oldest to newest.
+Per-asset history, oldest to newest. Each point surfaces the most operator-relevant channels (`vibration_magnitude`, `temperature_c`, `pseudo_pressure_pa`, `power_dissipated_w`) plus the prediction; the full 19 channels remain available in `raw_payload`.
 
 **Query params:** `?limit=50` (1–200)
 
-**Response 200:** `AssetTimelineResponse` — array of historical readings with anomaly scores.
+**Response 200:** `AssetTimelineResponse`.
 
 ---
 
@@ -112,13 +145,14 @@ In-memory replay validation metrics snapshot.
 **Response 200:**
 ```json
 {
-  "total_events": 200,
-  "correct_predictions": 174,
-  "accuracy": 0.87,
-  "per_class_ground_truth": { "bearing_fault": 80, "no_fault": 70, ... },
-  "per_class_predicted": { "bearing_fault": 75, "no_fault": 72, ... },
-  "confusion_matrix": { "bearing_fault": { "bearing_fault": 70, "no_fault": 8 }, ... },
-  "per_model_counts": { "lightgbm": 200 }
+  "total_replayed": 200,
+  "total_correct": 198,
+  "running_accuracy": 0.99,
+  "per_class_ground_truth": { "bearing_wear": 36, "nominal": 36, "overheat": 36, "overload": 36, "pressure_fault": 28, "wheel_slip": 28 },
+  "per_class_predicted":    { "bearing_wear": 36, "nominal": 36, "overheat": 36, "overload": 36, "pressure_fault": 28, "wheel_slip": 28 },
+  "confusion_counts":       { "bearing_wear->bearing_wear": 36, "overheat->overheat": 36 },
+  "per_model":              { "lightgbm": 200 },
+  "last_updated": "2026-05-14T12:00:00Z"
 }
 ```
 
@@ -137,20 +171,33 @@ ws.onmessage = (e) => {
 
 ---
 
+## Fault classes returned in `anomaly.anomaly_type`
+
+| Code | Label             | Default severity | Operator action |
+|------|-------------------|------------------|-----------------|
+| 0    | `nominal`         | info             | none |
+| 1    | `bearing_wear`    | warning          | inspect bearings |
+| 2    | `overheat`        | critical         | reduce load, verify cooling |
+| 3    | `overload`        | warning          | check payload vs rating |
+| 4    | `pressure_fault`  | warning          | inspect hydraulic / pneumatic line |
+| 5    | `wheel_slip`      | warning          | check traction / surface |
+
+---
+
 ## Internal Service Communication
 
 ### API → AI Pipeline (in-process)
-The API lazy-imports `ai.pipeline.run_pipeline` inside the route handler (`events.py:94–108`). No network call — direct Python function call via shared `PYTHONPATH`. CPU-bound inference is offloaded to `asyncio.to_thread`.
+The API lazy-imports `ai.pipeline.run_pipeline` inside the route handler. No network call — direct Python function call via shared `PYTHONPATH`. CPU-bound inference is offloaded to `asyncio.to_thread`.
 
 ### API → Isaac Sim Adapter (fire-and-forget)
-After broadcasting, `_try_notify_sim(twin_update)` attempts to import and call the sim adapter. All failures are silently swallowed via bare `try/except`.
+After broadcasting, `_try_notify_sim(twin_update)` attempts to import and call the sim adapter. All failures are silently swallowed so a missing or down sim never blocks event processing.
 
 ### Dashboard polling cadence
 | Trigger | Endpoint |
 |---|---|
 | On mount | `GET /alerts/` |
-| Every 2s (Dashboard) | `GET /metrics/live` |
-| Every 4s (Validation) | `GET /metrics/live` + `GET /alerts/?limit=100` |
+| Every 2 s (Dashboard) | `GET /metrics/live` |
+| Every 4 s (Validation) | `GET /metrics/live` + `GET /alerts/?limit=100` |
 | On event select | `GET /assets/{id}/timeline` + `GET /alerts/{id}/actions` |
 | Operator action | `POST /alerts/{id}/actions` |
 | Clear Logs | `DELETE /alerts/clear` |

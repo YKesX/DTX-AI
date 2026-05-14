@@ -29,8 +29,7 @@ const config: Config = {
       {
         docs: {
           sidebarPath: './sidebars.ts',
-          
-          editUrl: 'https://github.com/YKesX/DTX-AI/tree/main/website/',
+          editUrl: 'https://github.com/YKesX/DTX-AI/tree/main/docweb/',
         },
         blog: false,
         theme: { customCss: './src/css/custom.css' },

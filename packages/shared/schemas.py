@@ -1,11 +1,11 @@
 """
 Canonical Pydantic schemas shared across all DTX-AI services.
 
-Version: 1.0 (MVP)
+Version: v2.0 — Isaac-Sim telemetry schema.
 
-Keep fields explicit and avoid Optional where a sensible default exists.
-Add a new versioned module (e.g. schemas_v2.py) rather than breaking
-these definitions when the contract evolves.
+The previous 4-channel (vibration / temperature / humidity / pressure) schema
+has been replaced with the 19-channel sensor set the models are now trained
+on. See services/ai/preprocessing.py:FEATURES for the canonical ordering.
 """
 
 from __future__ import annotations
@@ -24,14 +24,20 @@ from pydantic import BaseModel, Field
 
 
 class AnomalyType(str, Enum):
-    """Coarse categories of detected anomaly."""
+    """Fault classes emitted by the trained classifier.
 
-    VIBRATION = "vibration"
-    TEMPERATURE = "temperature"
-    HUMIDITY = "humidity"
-    PRESSURE = "pressure"
-    COMBINED = "combined"
+    Values match the canonical strings in the training dataset's
+    ``fault_label`` column and the ``class_mapping`` block in every
+    services/ai/ai/models/*/metadata.json file.
+    """
+
     UNKNOWN = "unknown"
+    NOMINAL = "nominal"
+    BEARING_WEAR = "bearing_wear"
+    OVERHEAT = "overheat"
+    OVERLOAD = "overload"
+    PRESSURE_FAULT = "pressure_fault"
+    WHEEL_SLIP = "wheel_slip"
 
 
 class Severity(str, Enum):
@@ -66,35 +72,68 @@ class AlertActionType(str, Enum):
 
 
 class EventIn(BaseModel):
-    """
-    Warehouse sensor event sent to POST /events.
+    """Asset telemetry frame sent to ``POST /events/``.
 
-    All numeric sensor readings are optional so that partial payloads
-    (e.g. a temperature-only sensor) are still valid.
+    Every sensor field is optional so partial frames remain valid; the runtime
+    treats missing channels as zero.  Field names match the dataset CSV columns
+    and the entries in services/ai/preprocessing.py:FEATURES exactly.
     """
 
-    event_id: UUID = Field(default_factory=uuid4, description="Unique event identifier")
-    asset_id: str = Field(..., description="Identifier of the warehouse asset or machine")
-    zone_id: str = Field(..., description="Warehouse zone where the asset is located")
+    event_id: UUID = Field(default_factory=uuid4)
+    asset_id: str = Field(..., description="Asset / forklift identifier")
+    zone_id: str = Field(..., description="Warehouse zone identifier")
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="Event creation time (UTC)",
     )
-    vibration: float | None = Field(None, ge=0, description="Vibration in mm/s²")
-    temperature: float | None = Field(None, description="Temperature in °C")
-    humidity: float | None = Field(None, ge=0, le=100, description="Relative humidity %")
-    pressure: float | None = Field(None, ge=0, description="Pressure in hPa")
-    metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary extra fields")
+
+    # IMU — linear acceleration (m/s²)
+    imu_lin_acc_x: float | None = None
+    imu_lin_acc_y: float | None = None
+    imu_lin_acc_z: float | None = None
+    # IMU — angular velocity (rad/s)
+    imu_ang_vel_x: float | None = None
+    imu_ang_vel_y: float | None = None
+    imu_ang_vel_z: float | None = None
+    # Combined vibration magnitude (m/s²)
+    vibration_magnitude: float | None = None
+    # Lift mechanism
+    lift_joint_position: float | None = None
+    lift_force_z: float | None = None
+    lift_joint_velocity: float | None = None
+    # Hydraulic / pneumatic proxy pressure (Pa)
+    pseudo_pressure_pa: float | None = None
+    # Drive joint
+    drive_joint_velocity: float | None = None
+    drive_joint_effort: float | None = None
+    # Four wheel-roller angular velocities (rad/s)
+    roller_fl_velocity: float | None = None
+    roller_fr_velocity: float | None = None
+    roller_bl_velocity: float | None = None
+    roller_br_velocity: float | None = None
+    # Bulk electrical
+    power_dissipated_w: float | None = None
+    # Thermal
+    temperature_c: float | None = None
+
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"json_schema_extra": {
         "examples": [
             {
-                "asset_id": "conveyor-belt-01",
+                "asset_id": "forklift-01",
                 "zone_id": "zone-A",
-                "vibration": 12.4,
-                "temperature": 78.5,
-                "humidity": 45.0,
-                "pressure": 1013.2,
+                "imu_lin_acc_x": -9.77, "imu_lin_acc_y": 0.0, "imu_lin_acc_z": 0.86,
+                "imu_ang_vel_x": 0.0, "imu_ang_vel_y": 0.0, "imu_ang_vel_z": 0.0,
+                "vibration_magnitude": 9.81,
+                "lift_joint_position": -0.15, "lift_force_z": 0.31,
+                "lift_joint_velocity": 0.0,
+                "pseudo_pressure_pa": 3.8,
+                "drive_joint_velocity": -0.01, "drive_joint_effort": 3082.0,
+                "roller_fl_velocity": 0.06, "roller_fr_velocity": -0.02,
+                "roller_bl_velocity": 0.07, "roller_br_velocity": 0.01,
+                "power_dissipated_w": 0.0,
+                "temperature_c": 25.15,
             }
         ]
     }}
@@ -109,8 +148,8 @@ class AnomalyResult(BaseModel):
     """Anomaly detection output produced by services/ai."""
 
     event_id: UUID = Field(..., description="References the originating EventIn.event_id")
-    anomaly_score: float = Field(..., ge=0.0, le=1.0, description="Normalised anomaly score (0 = normal, 1 = certain anomaly)")
-    is_anomaly: bool = Field(..., description="True when score exceeds the configured threshold")
+    anomaly_score: float = Field(..., ge=0.0, le=1.0)
+    is_anomaly: bool
     anomaly_type: AnomalyType = Field(default=AnomalyType.UNKNOWN)
     severity: Severity = Field(default=Severity.INFO)
     detected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -119,16 +158,10 @@ class AnomalyResult(BaseModel):
 class ExplanationResult(BaseModel):
     """Human-readable XAI explanation for an anomaly."""
 
-    event_id: UUID = Field(..., description="References the originating EventIn.event_id")
-    summary: str = Field(..., description="One-sentence plain English explanation")
-    contributing_features: dict[str, float] = Field(
-        default_factory=dict,
-        description="Feature → importance score (e.g. from SHAP)",
-    )
-    recommendation: str = Field(
-        default="",
-        description="Short suggested action for the operator",
-    )
+    event_id: UUID
+    summary: str
+    contributing_features: dict[str, float] = Field(default_factory=dict)
+    recommendation: str = Field(default="")
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -138,17 +171,14 @@ class ExplanationResult(BaseModel):
 
 
 class TwinUpdate(BaseModel):
-    """
-    Payload sent to the Isaac Sim adapter when an anomaly is confirmed.
-    The adapter is the only consumer; keep this schema thin.
-    """
+    """Payload sent to the Isaac Sim adapter when an anomaly is confirmed."""
 
     event_id: UUID
     asset_id: str
     zone_id: str
     new_status: AssetStatus
     severity: Severity
-    label: str = Field(default="", description="Short display label for the sim overlay")
+    label: str = Field(default="")
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -158,11 +188,7 @@ class TwinUpdate(BaseModel):
 
 
 class DashboardAlert(BaseModel):
-    """
-    Composed object broadcast over WebSocket /ws/events and stored for
-    GET /alerts.  Combines the raw event, anomaly result, and explanation
-    into a single message for the frontend.
-    """
+    """Composed object broadcast over WebSocket /ws/events and stored for /alerts."""
 
     alert_id: UUID = Field(default_factory=uuid4)
     event: EventIn
@@ -172,7 +198,7 @@ class DashboardAlert(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Persisted event log entry
+# Persisted event log + operator workflow
 # ---------------------------------------------------------------------------
 
 
@@ -224,10 +250,10 @@ class AssetTimelinePoint(BaseModel):
 
     event_id: UUID
     timestamp: datetime
-    vibration: float | None = None
-    temperature: float | None = None
-    humidity: float | None = None
-    pressure: float | None = None
+    vibration_magnitude: float | None = None
+    temperature_c: float | None = None
+    pseudo_pressure_pa: float | None = None
+    power_dissipated_w: float | None = None
     anomaly_score: float = 0.0
     severity: Severity = Severity.INFO
     predicted_label: str | None = None

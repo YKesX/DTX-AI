@@ -2,6 +2,8 @@
 
 Built with [Docusaurus](https://docusaurus.io/).
 
+Current docs release: `v2.0`
+
 ## Local Development
 
 ```bash

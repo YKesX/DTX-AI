@@ -1,35 +1,46 @@
-"""Runtime anomaly detector backed by model registry with safe fallbacks."""
+"""Runtime anomaly detector backed by the model registry with rule-based fallback."""
 
 from __future__ import annotations
 
 import os
-from collections import OrderedDict, deque
+import sys
+from pathlib import Path
 
 import pandas as pd
 
 from shared.schemas import AnomalyResult, AnomalyType, EventIn, Severity
 
+# preprocessing.py owns the FEATURES list and CLASS_NAMES — single source of truth.
+_SERVICES_AI_ROOT = Path(__file__).resolve().parents[1]
+if str(_SERVICES_AI_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SERVICES_AI_ROOT))
+from preprocessing import CLASS_NAMES, FEATURES  # noqa: E402
+
 from ai.model_loader import RuntimeModel, load_runtime_model
 
-# Thresholds for the rule-based stub
-_THRESHOLDS = {
-    "vibration": 10.0,   # mm/s²
-    "temperature": 75.0, # °C
-    "humidity": 85.0,    # %
-    "pressure": 1050.0,  # hPa (upper bound)
-}
-
 _ANOMALY_THRESHOLD = float(os.getenv("ANOMALY_THRESHOLD", "0.5"))
-_WINDOW_BUFFER: OrderedDict[str, deque] = OrderedDict()
-_WINDOW_SIZE = 5
-_MAX_WINDOW_KEYS = int(os.getenv("WINDOW_BUFFER_MAX_KEYS", "500"))
-DEFAULT_FEATURE_COUNT = 9
 
-_CLASS_MAP = {
-    0: (AnomalyType.UNKNOWN, Severity.INFO),
-    1: (AnomalyType.VIBRATION, Severity.WARNING),
-    2: (AnomalyType.TEMPERATURE, Severity.CRITICAL),
-}
+
+# Each class id → (AnomalyType, default Severity). Order must match
+# preprocessing.CLASS_NAMES so the model's argmax → AnomalyType lookup stays
+# correct without a name-based round-trip.
+def _build_class_map() -> dict[int, tuple[AnomalyType, Severity]]:
+    severity_for = {
+        "nominal":        Severity.INFO,
+        "bearing_wear":   Severity.WARNING,
+        "overheat":       Severity.CRITICAL,
+        "overload":       Severity.WARNING,
+        "pressure_fault": Severity.WARNING,
+        "wheel_slip":     Severity.WARNING,
+    }
+    out: dict[int, tuple[AnomalyType, Severity]] = {}
+    for idx, name in enumerate(CLASS_NAMES):
+        out[idx] = (AnomalyType(name), severity_for.get(name, Severity.WARNING))
+    return out
+
+
+_CLASS_MAP = _build_class_map()
+
 _SEVERITY_WEIGHT = {
     Severity.INFO: 0,
     Severity.WARNING: 1,
@@ -37,70 +48,28 @@ _SEVERITY_WEIGHT = {
 }
 
 
-def _event_to_raw_features(event: EventIn) -> dict[str, float]:
-    return {
-        "Vibration (mm/s)": float(event.vibration or 0.0),
-        "Temperature (°C)": float(event.temperature or 0.0),
-        "Pressure (bar)": float(event.pressure or 0.0),
-    }
+# Rule-based thresholds derived from per-class means in the training data
+# (see docs/isaac_sim_integration.md §2.x for the full ranges).
+_RULE_THRESHOLDS = {
+    "temperature_c": 40.0,       # nominal ~25, overheat ~49, wheel_slip ~52
+    "pseudo_pressure_pa": 1000.0,  # nominal ~4, overheat ~2487, pressure_fault ~-8558
+    "power_dissipated_w": 500.0,  # nominal ~0, overheat ~1966, wheel_slip ~1158
+    "vibration_magnitude": 15.0,  # nominal ~9.8, faults around the same — weak signal
+}
 
 
-def _touch_window_buffer(key: str) -> deque:
-    if key in _WINDOW_BUFFER:
-        _WINDOW_BUFFER.move_to_end(key)
-        return _WINDOW_BUFFER[key]
-
-    if len(_WINDOW_BUFFER) >= _MAX_WINDOW_KEYS:
-        _WINDOW_BUFFER.popitem(last=False)
-    _WINDOW_BUFFER[key] = deque(maxlen=_WINDOW_SIZE)
-    return _WINDOW_BUFFER[key]
-
-
-def _build_window_features(event: EventIn, feature_order: list[str]) -> list[float]:
-    key = f"{event.asset_id}:{event.zone_id}"
-    raw = _event_to_raw_features(event)
-    history = _touch_window_buffer(key)
-    history.append(raw)
-    rows = list(history)
-
-    vibration_values = [r["Vibration (mm/s)"] for r in rows]
-    temp_values = [r["Temperature (°C)"] for r in rows]
-    pressure_values = [r["Pressure (bar)"] for r in rows]
-
-    vib_last = vibration_values[-1]
-    temp_last = temp_values[-1]
-    pressure_last = pressure_values[-1]
-    vib_mean = sum(vibration_values) / len(vibration_values)
-    temp_mean = sum(temp_values) / len(temp_values)
-    pressure_mean = sum(pressure_values) / len(pressure_values)
-    if len(vibration_values) > 1:
-        variance = sum((v - vib_mean) ** 2 for v in vibration_values) / len(vibration_values)
-        vib_std = variance**0.5
-    else:
-        vib_std = 0.0
-
-    return [
-        vib_last,
-        temp_last,
-        pressure_last,
-        vib_mean,
-        vib_std,
-        max(vibration_values),
-        temp_mean,
-        temp_last - temp_values[0],
-        pressure_mean,
-    ][: len(feature_order) or DEFAULT_FEATURE_COUNT]
+def _feature_vector(event: EventIn) -> list[float]:
+    """Extract the 19 sensor channels in canonical FEATURES order."""
+    return [float(getattr(event, name) or 0.0) for name in FEATURES]
 
 
 def _feature_columns(runtime: RuntimeModel, feature_count: int) -> list[str]:
     if runtime.feature_order:
         return runtime.feature_order[:feature_count]
-
     scaler_names = getattr(runtime.scaler, "feature_names_in_", None)
     if scaler_names is not None:
-        return [str(name) for name in list(scaler_names)[:feature_count]]
-
-    return [f"f{i}" for i in range(feature_count)]
+        return [str(n) for n in list(scaler_names)[:feature_count]]
+    return FEATURES[:feature_count]
 
 
 def _build_model_input_df(features: list[float], runtime: RuntimeModel) -> pd.DataFrame:
@@ -112,7 +81,7 @@ def _run_tree_model(event: EventIn, runtime: RuntimeModel) -> AnomalyResult:
     if runtime.model is None:
         return _rule_based_detect(event)
 
-    features = _build_window_features(event, runtime.feature_order)
+    features = _feature_vector(event)
     x = _build_model_input_df(features, runtime)
     if runtime.scaler is not None:
         x = runtime.scaler.transform(x)
@@ -126,13 +95,12 @@ def _run_tree_model(event: EventIn, runtime: RuntimeModel) -> AnomalyResult:
     else:
         anomaly_score = float(pred_class != 0)
 
-    anomaly_type, severity = _CLASS_MAP.get(pred_class, (AnomalyType.COMBINED, Severity.WARNING))
+    anomaly_type, severity = _CLASS_MAP.get(pred_class, (AnomalyType.UNKNOWN, Severity.WARNING))
     threshold = runtime.metadata.get("default_threshold")
-    if threshold is None:
-        threshold = _ANOMALY_THRESHOLD
-    is_anomaly = pred_class != 0 and anomaly_score >= float(threshold)
+    threshold = float(threshold) if threshold is not None else _ANOMALY_THRESHOLD
+    is_anomaly = pred_class != 0 and anomaly_score >= threshold
     if not is_anomaly:
-        anomaly_type, severity = AnomalyType.UNKNOWN, Severity.INFO
+        anomaly_type, severity = AnomalyType.NOMINAL, Severity.INFO
 
     return AnomalyResult(
         event_id=event.event_id,
@@ -143,13 +111,69 @@ def _run_tree_model(event: EventIn, runtime: RuntimeModel) -> AnomalyResult:
     )
 
 
+def _run_lstm_autoencoder(event: EventIn, runtime: RuntimeModel) -> AnomalyResult:
+    try:
+        import torch
+        import torch.nn.functional as F
+    except Exception:
+        return _rule_based_detect(event)
+
+    model = runtime.model
+    if model is None:
+        return _rule_based_detect(event)
+
+    features = _feature_vector(event)
+    x = _build_model_input_df(features, runtime)
+    if runtime.scaler is not None:
+        x_array = runtime.scaler.transform(x)
+    else:
+        x_array = x.values
+    tensor = torch.tensor(x_array, dtype=torch.float32).unsqueeze(1)
+
+    with torch.no_grad():
+        out = model(tensor)
+        if not isinstance(out, tuple) or len(out) != 2:
+            raise RuntimeError(
+                "LSTM-AE checkpoint does not expose a classification head. "
+                "Retrain via scripts/train_models.py against ai.lstm_classifier."
+            )
+        reconstructed, logits = out
+        probs = F.softmax(logits, dim=-1)[0]
+        pred_class = int(torch.argmax(probs).item())
+        class_confidence = float(probs[pred_class].item())
+        mse = float(torch.mean((reconstructed - tensor) ** 2).item())
+
+    anomaly_type, severity = _CLASS_MAP.get(pred_class, (AnomalyType.UNKNOWN, Severity.WARNING))
+    threshold = runtime.metadata.get("default_threshold")
+    threshold = float(threshold) if threshold is not None else _ANOMALY_THRESHOLD
+    is_anomaly = pred_class != 0 and class_confidence >= threshold
+    if not is_anomaly:
+        anomaly_type, severity = AnomalyType.NOMINAL, Severity.INFO
+
+    metadata = event.metadata if isinstance(event.metadata, dict) else {}
+    metadata["lstm_predicted_class"] = pred_class
+    metadata["lstm_class_confidence"] = round(class_confidence, 6)
+    metadata["lstm_reconstruction_mse"] = round(mse, 6)
+    metadata["lstm_class_probabilities"] = {
+        str(i): round(float(p.item()), 6) for i, p in enumerate(probs)
+    }
+    event.metadata = metadata
+
+    return AnomalyResult(
+        event_id=event.event_id,
+        anomaly_score=round(min(max(class_confidence, 0.0), 1.0), 4),
+        is_anomaly=is_anomaly,
+        anomaly_type=anomaly_type,
+        severity=severity,
+    )
+
+
 def _merge_with_guardrails(primary: AnomalyResult, fallback: AnomalyResult) -> AnomalyResult:
+    """Combine model output with rule-based fallback. Same contract as before."""
     if fallback.is_anomaly and not primary.is_anomaly:
         return fallback
-
     if not fallback.is_anomaly and primary.is_anomaly:
         return primary
-
     if fallback.is_anomaly and primary.is_anomaly:
         anomaly_type = (
             fallback.anomaly_type
@@ -168,84 +192,54 @@ def _merge_with_guardrails(primary: AnomalyResult, fallback: AnomalyResult) -> A
             anomaly_type=anomaly_type,
             severity=severity,
         )
-
     return fallback
 
 
-def _run_lstm_autoencoder(event: EventIn, runtime: RuntimeModel) -> AnomalyResult:
-    threshold = runtime.metadata.get("default_threshold")
-    if threshold is None:
-        return _rule_based_detect(event)
-
-    try:
-        import torch
-    except Exception:
-        return _rule_based_detect(event)
-
-    features = _build_window_features(event, runtime.feature_order)
-    x = _build_model_input_df(features, runtime)
-    if runtime.scaler is not None:
-        x = runtime.scaler.transform(x)
-    tensor = torch.tensor(x.values, dtype=torch.float32).unsqueeze(1)
-
-    model = runtime.model
-    if model is None:
-        return _rule_based_detect(event)
-
-    with torch.no_grad():
-        reconstructed = model(tensor)
-        mse = float(torch.mean((reconstructed - tensor) ** 2).item())
-
-    t = float(threshold)
-    is_anomaly = mse >= t
-    anomaly_score = 1.0 if is_anomaly and t <= 0 else min(mse / t, 1.0)
-    severity = Severity.CRITICAL if anomaly_score >= 0.8 else Severity.WARNING if is_anomaly else Severity.INFO
-
-    return AnomalyResult(
-        event_id=event.event_id,
-        anomaly_score=round(min(max(anomaly_score, 0.0), 1.0), 4),
-        is_anomaly=is_anomaly,
-        anomaly_type=AnomalyType.COMBINED if is_anomaly else AnomalyType.UNKNOWN,
-        severity=severity,
-    )
-
-
 def _rule_based_detect(event: EventIn) -> AnomalyResult:
-    """Rule-based detector kept as fallback when registry model is unavailable."""
+    """Threshold-based fallback used when no model is loadable.
+
+    Picks the dominant abnormal channel and maps it to the nearest fault class.
+    Severity scales with how many channels are above threshold.
+    """
     scores: dict[str, float] = {}
 
-    if event.vibration is not None and event.vibration > _THRESHOLDS["vibration"]:
-        scores["vibration"] = min(event.vibration / _THRESHOLDS["vibration"] - 1.0, 1.0)
+    temp = event.temperature_c
+    if temp is not None and temp > _RULE_THRESHOLDS["temperature_c"]:
+        scores["temperature_c"] = min((temp - _RULE_THRESHOLDS["temperature_c"]) / 20.0, 1.0)
 
-    if event.temperature is not None and event.temperature > _THRESHOLDS["temperature"]:
-        scores["temperature"] = min(
-            (event.temperature - _THRESHOLDS["temperature"]) / 25.0, 1.0
+    pressure = event.pseudo_pressure_pa
+    if pressure is not None and abs(pressure) > _RULE_THRESHOLDS["pseudo_pressure_pa"]:
+        scores["pseudo_pressure_pa"] = min(
+            (abs(pressure) - _RULE_THRESHOLDS["pseudo_pressure_pa"]) / 5000.0, 1.0,
         )
 
-    if event.humidity is not None and event.humidity > _THRESHOLDS["humidity"]:
-        scores["humidity"] = min(
-            (event.humidity - _THRESHOLDS["humidity"]) / 15.0, 1.0
+    power = event.power_dissipated_w
+    if power is not None and power > _RULE_THRESHOLDS["power_dissipated_w"]:
+        scores["power_dissipated_w"] = min(
+            (power - _RULE_THRESHOLDS["power_dissipated_w"]) / 1500.0, 1.0,
         )
 
-    if event.pressure is not None and event.pressure > _THRESHOLDS["pressure"]:
-        scores["pressure"] = min(
-            (event.pressure - _THRESHOLDS["pressure"]) / 50.0, 1.0
+    vibration = event.vibration_magnitude
+    if vibration is not None and vibration > _RULE_THRESHOLDS["vibration_magnitude"]:
+        scores["vibration_magnitude"] = min(
+            (vibration - _RULE_THRESHOLDS["vibration_magnitude"]) / 5.0, 1.0,
         )
 
     anomaly_score = min(sum(scores.values()), 1.0)
     is_anomaly = anomaly_score >= _ANOMALY_THRESHOLD
 
-    # Determine dominant anomaly type
+    # Coarse mapping from dominant rule-channel → AnomalyType.
     if scores:
         dominant = max(scores, key=lambda k: scores[k])
-        try:
-            anomaly_type = AnomalyType(dominant)
-        except ValueError:
-            anomaly_type = AnomalyType.COMBINED if len(scores) > 1 else AnomalyType.UNKNOWN
+        anomaly_type = {
+            "temperature_c": AnomalyType.OVERHEAT,
+            "pseudo_pressure_pa": AnomalyType.PRESSURE_FAULT,
+            "power_dissipated_w": AnomalyType.OVERLOAD,
+            "vibration_magnitude": AnomalyType.BEARING_WEAR,
+        }.get(dominant, AnomalyType.UNKNOWN)
     else:
-        anomaly_type = AnomalyType.UNKNOWN
+        anomaly_type = AnomalyType.NOMINAL
 
-    # Map score to severity
     if anomaly_score >= 0.8:
         severity = Severity.CRITICAL
     elif anomaly_score >= 0.5:
@@ -266,7 +260,8 @@ def detect(event: EventIn) -> AnomalyResult:
     if os.getenv("DTX_FORCE_STUB", "0") == "1":
         return _rule_based_detect(event)
 
-    if all(value is None for value in (event.vibration, event.temperature, event.pressure)):
+    # If every sensor is None, the rule-based detector is the only sensible answer.
+    if all(getattr(event, name) is None for name in FEATURES):
         return _rule_based_detect(event)
 
     metadata = event.metadata if isinstance(event.metadata, dict) else {}
@@ -308,9 +303,9 @@ def detect(event: EventIn) -> AnomalyResult:
             return fallback
 
     if runtime.family == "lstm_autoencoder_pytorch":
-        if strict_replay and runtime.metadata.get("default_threshold") is None:
+        if strict_replay and not runtime.metadata.get("class_mapping"):
             raise RuntimeError(
-                "Strict replay mode requires a numeric LSTM-AE threshold; metadata.default_threshold is null"
+                "Strict replay mode requires LSTM-AE metadata.class_mapping for multi-class output."
             )
         try:
             result = _run_lstm_autoencoder(event, runtime)
@@ -322,5 +317,4 @@ def detect(event: EventIn) -> AnomalyResult:
 
     if strict_replay:
         raise RuntimeError(f"Strict replay mode does not support model family '{runtime.family}'")
-
     return fallback

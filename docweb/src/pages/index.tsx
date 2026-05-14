@@ -50,7 +50,7 @@ function HomepageHeader() {
             </Link>
           </div>
           <div className={styles.heroMeta}>
-            <span>Version 0.2.0</span>
+            <span>Version v2.0</span>
             <span>Graduation project</span>
             <span>Atılım University</span>
           </div>

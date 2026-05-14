@@ -3,81 +3,80 @@
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
 import pandas as pd
 
-from shared.schemas import AnomalyResult, ExplanationResult, EventIn
+from shared.schemas import AnomalyResult, EventIn, ExplanationResult
 from ai.model_loader import load_runtime_model
 
-_THRESHOLDS = {
-    "vibration": 10.0,
-    "temperature": 75.0,
-    "humidity": 85.0,
-    "pressure": 1050.0,
+_SERVICES_AI_ROOT = Path(__file__).resolve().parents[1]
+if str(_SERVICES_AI_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SERVICES_AI_ROOT))
+from preprocessing import FEATURES  # noqa: E402
+
+# Operator-facing recommendation per canonical fault class.
+_RECOMMENDATIONS = {
+    "nominal": "No action required — asset operating within nominal envelope.",
+    "bearing_wear": "Schedule bearing inspection; vibration / power dissipation trending up.",
+    "overheat": "Reduce load and verify cooling; temperature and power are both elevated.",
+    "overload": "Check payload weight and drive-joint effort against rated capacity.",
+    "pressure_fault": "Inspect hydraulic / pneumatic line — pseudo-pressure is out of range.",
+    "wheel_slip": "Check tyre/roller traction and surface conditions; roller speeds desynchronised.",
+    "unknown": "Review sensor data and check calibration.",
 }
 
-_RECOMMENDATIONS = {
-    "vibration": "Schedule immediate maintenance inspection for the asset.",
-    "temperature": "Check cooling system and reduce operational load.",
-    "humidity": "Inspect seals and activate dehumidification.",
-    "pressure": "Check pneumatic lines for leaks or blockages.",
-    "combined": "Multiple sensor readings are elevated — review asset health holistically.",
-    "unknown": "Review sensor data and check for calibration issues.",
+# Rule-based attribution thresholds for the fallback explainer — same channels
+# as services/ai/ai/detector.py:_RULE_THRESHOLDS, kept independent to allow
+# tuning the explainer's "what looks abnormal" view without touching detection.
+_ATTRIBUTION_THRESHOLDS = {
+    "temperature_c": 40.0,
+    "pseudo_pressure_pa": 1000.0,
+    "power_dissipated_w": 500.0,
+    "vibration_magnitude": 15.0,
 }
 
 
 def _fallback_explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
-    """
-    Generate a human-readable explanation for an anomaly result.
+    """Rule-based explanation when no model with SHAP support is available."""
+    contributions: dict[str, float] = {}
+    for name, threshold in _ATTRIBUTION_THRESHOLDS.items():
+        value = getattr(event, name, None)
+        if value is None:
+            continue
+        magnitude = abs(value) if name == "pseudo_pressure_pa" else value
+        if magnitude > threshold:
+            contributions[name] = round(min((magnitude - threshold) / threshold, 1.0), 4)
 
-    Feature attributions (stub): proportion of each sensor's contribution
-    to the total anomaly score.
-    TODO: replace with SHAP TreeExplainer / DeepExplainer when model is ready.
-    """
-    features: dict[str, float] = {}
+    total = sum(contributions.values()) or 1.0
+    normalised = {k: round(v / total, 4) for k, v in contributions.items()}
 
-    sensor_map = {
-        "vibration": event.vibration,
-        "temperature": event.temperature,
-        "humidity": event.humidity,
-        "pressure": event.pressure,
-    }
-
-    for name, value in sensor_map.items():
-        if value is not None and value > _THRESHOLDS[name]:
-            # Simple linear attribution stub
-            features[name] = round(
-                min((value - _THRESHOLDS[name]) / _THRESHOLDS[name], 1.0), 4
-            )
-
-    # Normalise attributions to sum to 1
-    total = sum(features.values()) or 1.0
-    normalised = {k: round(v / total, 4) for k, v in features.items()}
-
-    if not features:
+    if not contributions:
         summary = (
             f"No significant anomaly detected for asset '{event.asset_id}' "
             f"in zone '{event.zone_id}' (score={anomaly.anomaly_score:.2f})."
         )
     else:
-        top_feature = max(features, key=lambda k: features[k])
+        top_feature = max(contributions, key=lambda k: contributions[k])
         summary = (
             f"Anomaly detected on asset '{event.asset_id}' in zone '{event.zone_id}'. "
             f"Primary driver: {top_feature} "
             f"(score={anomaly.anomaly_score:.2f}, severity={anomaly.severity.value})."
         )
 
-    recommendation = _RECOMMENDATIONS.get(
-        anomaly.anomaly_type.value,
-        _RECOMMENDATIONS["unknown"],
-    )
-
     return ExplanationResult(
         event_id=event.event_id,
         summary=summary,
         contributing_features=normalised,
-        recommendation=recommendation,
+        recommendation=_RECOMMENDATIONS.get(
+            anomaly.anomaly_type.value, _RECOMMENDATIONS["unknown"],
+        ),
     )
+
+
+def _feature_vector(event: EventIn) -> list[float]:
+    return [float(getattr(event, name) or 0.0) for name in FEATURES]
 
 
 def explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
@@ -90,49 +89,23 @@ def explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
         requested_model=str(requested_model) if requested_model else None,
         strict_selection=strict_replay,
     )
+
     if runtime.available and runtime.supports_tree_xai and runtime.model is not None:
         try:
-            # services/ is on PYTHONPATH in dev/test/CI, so import via ai namespace.
-            from ai.xai_explainer import FEATURES, generate_xai_report
+            from ai.xai_explainer import generate_xai_report
 
-            sensor_values = {
-                "Vibration (mm/s)": float(event.vibration or 0.0),
-                "Temperature (°C)": float(event.temperature or 0.0),
-                "Pressure (bar)": float(event.pressure or 0.0),
-            }
-            feature_values = {
-                "Vibration (mm/s)": sensor_values["Vibration (mm/s)"],
-                "Temperature (°C)": sensor_values["Temperature (°C)"],
-                "Pressure (bar)": sensor_values["Pressure (bar)"],
-                "vib_rolling_mean": sensor_values["Vibration (mm/s)"],
-                "vib_rolling_std": 0.0,
-                "vib_rolling_max": sensor_values["Vibration (mm/s)"],
-                "temp_rolling_mean": sensor_values["Temperature (°C)"],
-                "temp_drift": 0.0,
-                "pressure_rolling_mean": sensor_values["Pressure (bar)"],
-            }
-            ordered = [feature_values.get(f, 0.0) for f in runtime.feature_order or FEATURES]
+            ordered = _feature_vector(event)
+            feature_names = runtime.feature_order or FEATURES
+            input_df = pd.DataFrame([ordered], columns=feature_names)
             if runtime.scaler is not None:
-                feature_names = runtime.feature_order or FEATURES
-                input_df = pd.DataFrame([ordered], columns=feature_names)
                 transformed = runtime.scaler.transform(input_df)[0]
             else:
                 transformed = ordered
-            input_features = {
-                (runtime.feature_order or FEATURES)[i]: float(transformed[i])
-                for i in range(len(runtime.feature_order or FEATURES))
-            }
-            class_map = {
-                "vibration": "bearing_fault",
-                "temperature": "overheating",
-                "unknown": "no_fault",
-                "combined": "bearing_fault",
-                "humidity": "bearing_fault",
-                "pressure": "bearing_fault",
-            }
+            input_features = {feature_names[i]: float(transformed[i]) for i in range(len(feature_names))}
+
             live_json = {
                 "timestamp": event.timestamp.isoformat(),
-                "anomaly_class": class_map.get(anomaly.anomaly_type.value, "no_fault"),
+                "anomaly_class": anomaly.anomaly_type.value,
                 "anomaly_score": anomaly.anomaly_score,
                 "input_features": input_features,
             }
@@ -146,13 +119,12 @@ def explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
                 summary=report.get("explanation_text", ""),
                 contributing_features=contributing,
                 recommendation=_RECOMMENDATIONS.get(
-                    anomaly.anomaly_type.value,
-                    _RECOMMENDATIONS["unknown"],
+                    anomaly.anomaly_type.value, _RECOMMENDATIONS["unknown"],
                 ),
             )
         except Exception:
             if strict_replay and hasattr(runtime.model, "feature_importances_"):
-                names = runtime.feature_order or []
+                names = runtime.feature_order or FEATURES
                 importances = list(getattr(runtime.model, "feature_importances_", []))
                 pairs = [
                     (names[i], float(importances[i]))
@@ -169,8 +141,7 @@ def explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
                     ),
                     contributing_features=normalized,
                     recommendation=_RECOMMENDATIONS.get(
-                        anomaly.anomaly_type.value,
-                        _RECOMMENDATIONS["unknown"],
+                        anomaly.anomaly_type.value, _RECOMMENDATIONS["unknown"],
                     ),
                 )
             if strict_replay:
@@ -180,13 +151,16 @@ def explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
     if runtime.available and runtime.family == "lstm_autoencoder_pytorch":
         summary = (
             f"LSTM-AE runtime used for asset '{event.asset_id}'. "
-            f"Anomaly score={anomaly.anomaly_score:.2f}, severity={anomaly.severity.value}."
+            f"Predicted class={anomaly.anomaly_type.value}, "
+            f"score={anomaly.anomaly_score:.2f}, severity={anomaly.severity.value}."
         )
         return ExplanationResult(
             event_id=event.event_id,
             summary=summary,
             contributing_features={},
-            recommendation="Review temporal sensor trend and reconstruction error monitor.",
+            recommendation=_RECOMMENDATIONS.get(
+                anomaly.anomaly_type.value, _RECOMMENDATIONS["unknown"],
+            ),
         )
 
     return _fallback_explain(event, anomaly)
