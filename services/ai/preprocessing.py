@@ -90,8 +90,9 @@ def load_data(file_name: str = "dtx_ai_master_dataset.csv") -> pd.DataFrame:
     if "fault_label" not in df.columns:
         raise ValueError("Dataset is missing required column: fault_label")
 
-    # Drop rows with missing fault labels
-    df = df.dropna(subset=["fault_label"]).reset_index(drop=True)
+    # Drop rows with missing fault labels (both NaN and string "nan")
+    df = df[df["fault_label"].notna()].copy()
+    df = df[df["fault_label"].astype(str).str.lower().str.strip() != "nan"].reset_index(drop=True)
     
     df["fault_label_name"] = df["fault_label"].astype(str)
     df["fault_label"] = df["fault_label_name"].map(LABEL_TO_INT)
