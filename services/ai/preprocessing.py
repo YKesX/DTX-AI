@@ -142,15 +142,43 @@ def get_demo_holdout(df: pd.DataFrame) -> pd.DataFrame:
     return split_training_pool_and_holdout(df)[1]
 
 
-def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
-    """No-op for the new 19-channel schema.
-
-    Kept as a stable import point for the notebook and training script; the
-    previous rolling-window feature engineering is no longer needed now that
-    the raw sensor set is rich enough to discriminate the 6 fault classes
-    on its own.
+def engineer_features(df: pd.DataFrame, window: int = 0, step: int = 0):
     """
-    return df
+    Feature engineering with optional sliding window support.
+
+    Args:
+        df:     DataFrame containing FEATURES columns and 'fault_label'.
+        window: Sliding window size. If 0 (default), returns df unchanged
+                (no-op — used by tree-based models and TabNet).
+                If > 0, applies sliding window and returns (X, y) numpy arrays
+                shaped [N_windows, window, len(FEATURES)] and [N_windows].
+        step:   Step size between windows. Defaults to window // 2 (50% overlap).
+                Ignored when window=0.
+
+    Returns:
+        window=0: original DataFrame (unchanged)
+        window>0: tuple (X_windows, y_windows)
+                  X_windows shape: [N, window, len(FEATURES)]
+                  y_windows shape: [N] — label of the last row in each window
+    """
+    if window == 0:
+        return df  # no-op for tree-based models and TabNet
+
+    import numpy as np
+
+    X = df[FEATURES].values
+    y = df['fault_label'].values
+
+    effective_step = step if step > 0 else window // 2
+
+    windows_X = []
+    windows_y = []
+
+    for i in range(0, len(X) - window + 1, effective_step):
+        windows_X.append(X[i:i + window])
+        windows_y.append(y[i + window - 1])  # label of last row in window
+
+    return np.array(windows_X), np.array(windows_y)
 
 
 def split_and_scale(df: pd.DataFrame):
