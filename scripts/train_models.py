@@ -108,7 +108,49 @@ def prepare_splits(
     test_ratio: float,
     random_state: int = RANDOM_STATE,
     scale_and_impute: bool = True,
+    window: int = 0,
+    step: int = 5,
 ):
+    if window > 0:
+        # Path C: Temporal DL (Chronological split, Imputation, Scaling, Windowing)
+        n_total = len(X)
+        train_end = int(n_total * train_ratio)
+        val_end = int(n_total * (train_ratio + val_ratio))
+        
+        X_train = X.iloc[:train_end].copy()
+        y_train = y.iloc[:train_end].copy()
+        
+        X_val = X.iloc[train_end:val_end].copy()
+        y_val = y.iloc[train_end:val_end].copy()
+        
+        X_test = X.iloc[val_end:].copy()
+        y_test = y.iloc[val_end:].copy()
+        
+        if scale_and_impute:
+            train_median = X_train.median()
+            X_train = X_train.fillna(train_median)
+            X_val = X_val.fillna(train_median)
+            X_test = X_test.fillna(train_median)
+            
+            scaler = StandardScaler()
+            X_train_s = pd.DataFrame(scaler.fit_transform(X_train), columns=FEATURES)
+            X_val_s = pd.DataFrame(scaler.transform(X_val), columns=FEATURES)
+            X_test_s = pd.DataFrame(scaler.transform(X_test), columns=FEATURES)
+        else:
+            X_train_s, X_val_s, X_test_s, scaler = X_train, X_val, X_test, None
+
+        def _make_windowed(X_df, y_series):
+            df_temp = X_df.copy()
+            df_temp["fault_label"] = y_series.values
+            return engineer_features(df_temp, window=window, step=step)
+
+        X_train_w, y_train_w = _make_windowed(X_train_s, y_train)
+        X_val_w, y_val_w = _make_windowed(X_val_s, y_val)
+        X_test_w, y_test_w = _make_windowed(X_test_s, y_test)
+        
+        return X_train_w, X_val_w, X_test_w, y_train_w, y_val_w, y_test_w, scaler
+
+    # Paths A & B: Standard Random Split
     X_temp, X_test, y_temp, y_test = train_test_split(
         X, y, test_size=test_ratio, random_state=random_state, stratify=y,
     )
