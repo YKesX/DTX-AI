@@ -154,8 +154,8 @@ def _run_lstm_autoencoder(event: EventIn, runtime: RuntimeModel) -> AnomalyResul
     metadata["lstm_predicted_class"] = pred_class
     metadata["lstm_class_confidence"] = round(class_confidence, 6)
     metadata["lstm_reconstruction_mse"] = round(mse, 6)
-    metadata["lstm_class_probabilities"] = {
-        str(i): round(float(p.item()), 6) for i, p in enumerate(probs)
+    metadata["lstm_raw_logits"] = {
+        str(i): round(float(lg.item()), 6) for i, lg in enumerate(logits[0])
     }
     event.metadata = metadata
 
@@ -293,10 +293,10 @@ def detect(event: EventIn) -> AnomalyResult:
     if not runtime.available:
         return fallback
 
-    if runtime.family in {"lightgbm", "random_forest", "xgboost"}:
+    if runtime.family in {"lightgbm", "random_forest", "xgboost", "tabnet_pytorch"}:
         try:
             result = _run_tree_model(event, runtime)
-            return _merge_with_guardrails(result, fallback) if not strict_replay else result
+            return result
         except Exception:
             if strict_replay:
                 raise
@@ -309,7 +309,7 @@ def detect(event: EventIn) -> AnomalyResult:
             )
         try:
             result = _run_lstm_autoencoder(event, runtime)
-            return _merge_with_guardrails(result, fallback) if not strict_replay else result
+            return result
         except Exception:
             if strict_replay:
                 raise
