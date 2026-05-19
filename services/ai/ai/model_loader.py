@@ -119,6 +119,19 @@ def _load_lstm_runtime_model(model_path: Path, metadata: dict[str, Any]) -> Any:
     return model
 
 
+def _load_tabnet_runtime_model(model_path: Path) -> Any:
+    try:
+        from pytorch_tabnet.tab_model import TabNetClassifier
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError(f"pytorch-tabnet unavailable: {exc}") from exc
+    
+    model = TabNetClassifier()
+    # TabNet's load_model expects a string path, optionally without the .zip extension,
+    # but providing the exact path works.
+    model.load_model(str(model_path))
+    return model
+
+
 def load_runtime_model(
     requested_model: str | None = None,
     strict_selection: bool = False,
@@ -175,6 +188,8 @@ def load_runtime_model(
 
             if family == "lstm_autoencoder_pytorch":
                 model = _load_lstm_runtime_model(model_path, metadata)
+            elif family == "tabnet_pytorch":
+                model = _load_tabnet_runtime_model(model_path)
             else:
                 model = joblib.load(model_path)
 
