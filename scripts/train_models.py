@@ -55,6 +55,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 import lightgbm as lgb
 import xgboost as xgb
+from pytorch_tabnet.tab_model import TabNetClassifier
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AI_ROOT = REPO_ROOT / "services" / "ai"
@@ -94,6 +95,8 @@ LSTM_WEIGHT_DECAY = 1e-4
 LAMBDA_RECON = 1.0
 LAMBDA_CLS = 1.0
 RANDOM_STATE = 42
+TABNET_N_D_LIST = [8, 16]
+TABNET_N_STEPS_LIST = [2, 3]
 
 
 # ── Notebook cell 3: prepare_splits ────────────────────────────────────────
@@ -104,6 +107,7 @@ def prepare_splits(
     val_ratio: float,
     test_ratio: float,
     random_state: int = RANDOM_STATE,
+    scale_and_impute: bool = True,
 ):
     X_temp, X_test, y_temp, y_test = train_test_split(
         X, y, test_size=test_ratio, random_state=random_state, stratify=y,
@@ -113,11 +117,19 @@ def prepare_splits(
         X_temp, y_temp, test_size=val_size_adjusted,
         random_state=random_state, stratify=y_temp,
     )
-    scaler = StandardScaler()
-    X_train_s = pd.DataFrame(scaler.fit_transform(X_train), columns=FEATURES)
-    X_val_s = pd.DataFrame(scaler.transform(X_val), columns=FEATURES)
-    X_test_s = pd.DataFrame(scaler.transform(X_test), columns=FEATURES)
-    return X_train_s, X_val_s, X_test_s, y_train, y_val, y_test, scaler
+    if scale_and_impute:
+        train_median = X_train.median()
+        X_train = X_train.fillna(train_median)
+        X_val = X_val.fillna(train_median)
+        X_test = X_test.fillna(train_median)
+
+        scaler = StandardScaler()
+        X_train_s = pd.DataFrame(scaler.fit_transform(X_train), columns=FEATURES)
+        X_val_s = pd.DataFrame(scaler.transform(X_val), columns=FEATURES)
+        X_test_s = pd.DataFrame(scaler.transform(X_test), columns=FEATURES)
+        return X_train_s, X_val_s, X_test_s, y_train, y_val, y_test, scaler
+    else:
+        return X_train, X_val, X_test, y_train, y_val, y_test, None
 
 
 # ── Notebook cell 4: evaluate_model (sans plotting) ────────────────────────
@@ -157,7 +169,7 @@ def sweep_random_forest(X, y):
     print("\n=== RandomForest sweep (5 splits × 2 × 2 = 20 configs) ===")
     best = {"f1": -1.0}
     for tr, vr, te in SPLIT_CONFIGS:
-        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(X, y, tr, vr, te)
+        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(X, y, tr, vr, te, scale_and_impute=True)
         for n in N_ESTIMATORS_LIST:
             for d in MAX_DEPTH_LIST:
                 model = RandomForestClassifier(
@@ -182,7 +194,7 @@ def sweep_lightgbm(X, y):
     print("\n=== LightGBM sweep (5 splits × 2 × 2 × 2 = 40 configs) ===")
     best = {"f1": -1.0}
     for tr, vr, te in SPLIT_CONFIGS:
-        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(X, y, tr, vr, te)
+        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(X, y, tr, vr, te, scale_and_impute=False)
         for n in N_ESTIMATORS_LIST:
             for d in MAX_DEPTH_LIST:
                 for lr in LEARNING_RATE_LIST:
@@ -209,7 +221,7 @@ def sweep_xgboost(X, y):
     print("\n=== XGBoost sweep (5 splits × 2 × 2 × 2 = 40 configs) ===")
     best = {"f1": -1.0}
     for tr, vr, te in SPLIT_CONFIGS:
-        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(X, y, tr, vr, te)
+        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(X, y, tr, vr, te, scale_and_impute=False)
         for n in N_ESTIMATORS_LIST:
             for d in MAX_DEPTH_LIST:
                 for lr in LEARNING_RATE_LIST:
@@ -248,7 +260,7 @@ def sweep_lstm_ae(X, y, num_classes: int):
     best = {"f1": -1.0}
     config_idx = 0
     for tr, vr, te in SPLIT_CONFIGS:
-        X_train, X_val, X_test, y_train, y_val, y_test, scaler = prepare_splits(X, y, tr, vr, te)
+        X_train, X_val, X_test, y_train, y_val, y_test, scaler = prepare_splits(X, y, tr, vr, te, scale_and_impute=True)
         X_train_t = torch.tensor(X_train.values, dtype=torch.float32, device=device).unsqueeze(1)
         X_val_t = torch.tensor(X_val.values, dtype=torch.float32, device=device).unsqueeze(1)
         y_train_t = torch.tensor(y_train.values, dtype=torch.long, device=device)
@@ -326,6 +338,72 @@ def sweep_lstm_ae(X, y, num_classes: int):
     return best, device
 
 
+def sweep_tabnet(X, y):
+    print("\n=== TabNet sweep (1 fixed split × 2 × 2 = 4 configs) ===")
+    best = {"f1": -1.0}
+    
+    # Fixed split to save extreme training times for DL models
+    tr, vr, te = 0.8, 0.1, 0.1
+    X_train, X_val, X_test, y_train, y_val, y_test, scaler = prepare_splits(X, y, tr, vr, te, scale_and_impute=True)
+    
+    for n_d in TABNET_N_D_LIST:
+        for n_steps in TABNET_N_STEPS_LIST:
+            model = TabNetClassifier(
+                n_d=n_d, n_a=n_d,
+                n_steps=n_steps,
+                gamma=1.5,
+                n_independent=1,
+                n_shared=2,
+                momentum=0.02,
+                mask_type='sparsemax',
+                optimizer_fn=torch.optim.Adam,
+                optimizer_params=dict(lr=2e-2, weight_decay=1e-3),
+                scheduler_params={"step_size": 10, "gamma": 0.9},
+                scheduler_fn=torch.optim.lr_scheduler.StepLR,
+                verbose=0,
+                seed=RANDOM_STATE,
+            )
+            model.fit(
+                X_train.values, y_train.values,
+                eval_set=[(X_val.values, y_val.values)],
+                eval_name=['val'],
+                eval_metric=['balanced_accuracy'],
+                weights=1,
+                max_epochs=50,
+                patience=7,
+                batch_size=256,
+                virtual_batch_size=128,
+                num_workers=0,
+                drop_last=False,
+            )
+            
+            # evaluate expects pd.DataFrame, TabNet predict expects numpy array.
+            # evaluate internally calls model.predict(X_val) so we wrap it.
+            class TabNetWrapper:
+                def __init__(self, m):
+                    self.m = m
+                def predict(self, X):
+                    return self.m.predict(X.values if isinstance(X, pd.DataFrame) else X)
+                def predict_proba(self, X):
+                    return self.m.predict_proba(X.values if isinstance(X, pd.DataFrame) else X)
+                def save_model(self, path):
+                    self.m.save_model(path)
+
+            wrapped_model = TabNetWrapper(model)
+            
+            result = evaluate(
+                wrapped_model, X_val, y_val, "TabNet",
+                split_label(tr, vr, te),
+                {"n_d": n_d, "n_steps": n_steps},
+            )
+            if result["f1"] > best.get("f1", -1.0):
+                best = {**result, "model_obj": wrapped_model, "scaler": scaler,
+                        "split_tuple": (tr, vr, te)}
+                
+    print(f"--- best TabNet: {best['split']}  {best['param']}  f1={best['f1']:.4f}")
+    return best
+
+
 # ── Saving ─────────────────────────────────────────────────────────────────
 def _final_report(y_true, y_pred, label: str) -> dict[str, float]:
     seen = sorted(set(int(v) for v in list(y_true) + list(y_pred)))
@@ -342,12 +420,11 @@ def _final_report(y_true, y_pred, label: str) -> dict[str, float]:
 def save_tree_artifact(best: dict, demo_holdout: pd.DataFrame, out_dir: Path,
                        artifact_name: str, family: str, supports_tree_xai: bool):
     out_dir.mkdir(parents=True, exist_ok=True)
-    # Final test report uses the canonical demo holdout (rows the model never
-    # trained on) — gives an honest, model-comparable generalisation number
-    # instead of resubstitution on the model's own split.
-    X_holdout = pd.DataFrame(
-        best["scaler"].transform(demo_holdout[FEATURES]), columns=FEATURES,
-    )
+    if best["scaler"] is not None:
+        X_holdout = pd.DataFrame(best["scaler"].transform(demo_holdout[FEATURES]), columns=FEATURES)
+    else:
+        X_holdout = demo_holdout[FEATURES].copy()
+
     y_holdout = demo_holdout["fault_label"].astype(int)
     y_pred = best["model_obj"].predict(X_holdout)
     test_metrics = _final_report(y_holdout.values, y_pred, family)
@@ -356,11 +433,11 @@ def save_tree_artifact(best: dict, demo_holdout: pd.DataFrame, out_dir: Path,
     metadata = {
         "model_name": artifact_name,
         "model_family": family,
-        "trained_on_dataset": "ziya07/industrial-iot-fault-detection-dataset",
+        "trained_on_dataset": "dtx_ai_master_dataset.csv",
         "feature_count": len(FEATURES),
         "num_classes": len(CLASS_NAMES),
         "feature_order_ref": "services/ai/models/shared/feature_order.json",
-        "scaler_required": True,
+        "scaler_required": best["scaler"] is not None,
         "class_mapping": {str(i): n for i, n in enumerate(CLASS_NAMES)},
         "training_split": best["split"],
         "best_params": best["param_dict"],
@@ -410,7 +487,7 @@ def save_lstm_artifact(best: dict, device: torch.device, num_classes: int,
     metadata = {
         "model_name": "best_lstmae.pth",
         "model_family": "lstm_autoencoder_pytorch",
-        "trained_on_dataset": "ziya07/industrial-iot-fault-detection-dataset",
+        "trained_on_dataset": "dtx_ai_master_dataset.csv",
         "feature_count": len(FEATURES),
         "num_classes": num_classes,
         "feature_order_ref": "services/ai/models/shared/feature_order.json",
@@ -442,6 +519,45 @@ def save_lstm_artifact(best: dict, device: torch.device, num_classes: int,
     print(f"[save] {pth_path}  +  metadata.json")
 
 
+def save_tabnet_artifact(best: dict, demo_holdout: pd.DataFrame):
+    out_dir = MODELS_ROOT / "tabnet"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    X_holdout = pd.DataFrame(best["scaler"].transform(demo_holdout[FEATURES]), columns=FEATURES)
+    y_holdout = demo_holdout["fault_label"].astype(int).values
+    
+    y_pred = best["model_obj"].predict(X_holdout)
+    test_metrics = _final_report(y_holdout, y_pred, "TabNet (demo holdout)")
+    
+    best["model_obj"].save_model(str(out_dir / "best_tabnet"))
+    artifact_name = "best_tabnet.zip"
+    
+    metadata = {
+        "model_name": artifact_name,
+        "model_family": "tabnet_pytorch",
+        "trained_on_dataset": "dtx_ai_master_dataset.csv",
+        "feature_count": len(FEATURES),
+        "num_classes": len(CLASS_NAMES),
+        "feature_order_ref": "services/ai/models/shared/feature_order.json",
+        "scaler_required": True,
+        "class_mapping": {str(i): n for i, n in enumerate(CLASS_NAMES)},
+        "training_split": best["split"],
+        "best_params": best["param_dict"],
+        "metrics": {
+            "val_accuracy": round(best["accuracy"], 6),
+            "val_f1": round(best["f1"], 6),
+            "val_precision": round(best["precision"], 6),
+            **{k: round(v, 6) for k, v in test_metrics.items()},
+        },
+        "decision_type": "multiclass_classifier",
+        "default_threshold": 0.5,
+        "supports_tree_xai": False,
+        "notes": "Trained via scripts/train_models.py (PyTorch TabNet).",
+    }
+    (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    print(f"[save] {out_dir}/{artifact_name}  +  metadata.json")
+
+
 # ── Notebook cell 10: pick overall best non-LSTM, retrain on train+val ─────
 def save_overall_best(best_rf, best_lgbm, best_xgb, X, y, demo_holdout: pd.DataFrame):
     candidates = {"RandomForest": best_rf, "LightGBM": best_lgbm, "XGBoost": best_xgb}
@@ -451,7 +567,8 @@ def save_overall_best(best_rf, best_lgbm, best_xgb, X, y, demo_holdout: pd.DataF
           f"f1={overall['f1']:.4f} ===")
 
     tr, vr, te = overall["split_tuple"]
-    X_train, X_val, X_test, y_train, y_val, y_test, scaler = prepare_splits(X, y, tr, vr, te)
+    needs_scaler = overall_name == "RandomForest" # RF still gets scaled
+    X_train, X_val, X_test, y_train, y_val, y_test, scaler = prepare_splits(X, y, tr, vr, te, scale_and_impute=needs_scaler)
     X_final = pd.concat([X_train, X_val])
     y_final = pd.concat([y_train, y_val])
 
@@ -477,15 +594,17 @@ def save_overall_best(best_rf, best_lgbm, best_xgb, X, y, demo_holdout: pd.DataF
 
     SHARED_DIR.mkdir(parents=True, exist_ok=True)
     joblib.dump(final_model, SHARED_DIR / "model_best.pkl")
-    joblib.dump(scaler, SHARED_DIR / "scaler.pkl")
+    if scaler is not None:
+        joblib.dump(scaler, SHARED_DIR / "scaler.pkl")
     (SHARED_DIR / "feature_order.json").write_text(json.dumps(FEATURES, indent=2) + "\n")
-    print(f"[save] {SHARED_DIR}/model_best.pkl  +  scaler.pkl  +  feature_order.json")
+    print(f"[save] {SHARED_DIR}/model_best.pkl  +  (scaler if required)  +  feature_order.json")
 
-    # Final eval against the canonical demo holdout — same data the dashboard
-    # demo will replay against, so this metric is what users actually see.
-    X_holdout_scaled = pd.DataFrame(
-        scaler.transform(demo_holdout[FEATURES]), columns=FEATURES,
-    )
+    # Final eval against the canonical demo holdout
+    if scaler is not None:
+        X_holdout_scaled = pd.DataFrame(scaler.transform(demo_holdout[FEATURES]), columns=FEATURES)
+    else:
+        X_holdout_scaled = demo_holdout[FEATURES].copy()
+        
     y_holdout = demo_holdout["fault_label"].astype(int)
     y_holdout_pred = final_model.predict(X_holdout_scaled)
     _final_report(
@@ -528,6 +647,10 @@ def main():
                        "lightgbm", supports_tree_xai=True)
     save_tree_artifact(best_xgb, demo_holdout, MODELS_ROOT / "xgboost", "best_xgb.pkl",
                        "xgboost", supports_tree_xai=True)
+
+    # TabNet sweep.
+    best_tabnet = sweep_tabnet(X, y)
+    save_tabnet_artifact(best_tabnet, demo_holdout)
 
     # Cell 8 — LSTM-AE+CLS sweep.
     best_lstm, device = sweep_lstm_ae(X, y, num_classes)

@@ -18,6 +18,7 @@ joblib==1.5.3
 # LSTM-AE (PyTorch). The CUDA build must be installed from the official
 # pytorch index for GPU support — see docs/ml_training.md.
 # torch==2.11.0  (install via: pip install torch --index-url https://download.pytorch.org/whl/cu128)
+pytorch-tabnet>=4.1.0
 
 # XAI
 shap>=0.45
