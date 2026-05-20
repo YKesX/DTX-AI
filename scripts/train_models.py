@@ -51,6 +51,7 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from sklearn.utils.class_weight import compute_class_weight
 from torch.utils.data import DataLoader, TensorDataset
 
 import lightgbm as lgb
@@ -71,6 +72,7 @@ from preprocessing import (  # noqa: E402
     split_training_pool_and_holdout,
 )
 from ai.lstm_classifier import LSTMAutoencoderClassifier  # noqa: E402
+from ai.cnn_classifier import CNNClassifier  # noqa: E402
 
 # ── Notebook cell 2: CONFIGURATION ─────────────────────────────────────────
 SPLIT_CONFIGS = [
@@ -95,6 +97,16 @@ LSTM_WEIGHT_DECAY = 1e-4
 LAMBDA_RECON = 1.0
 LAMBDA_CLS = 1.0
 RANDOM_STATE = 42
+
+CNN_EPOCHS = [20, 40]
+CNN_BATCH_SIZE = 64
+CNN_CONV_CHANNELS_LIST = [16, 32]
+CNN_HIDDEN_DIMS = [32, 64]
+CNN_KERNEL_SIZES = [3, 5]
+CNN_LR_LIST = [0.001, 0.01]
+CNN_DROPOUT = 0.1
+CNN_WINDOW_SIZE = 30
+
 TABNET_N_D_LIST = [8, 16]
 TABNET_N_STEPS_LIST = [2, 3]
 
@@ -112,41 +124,31 @@ def prepare_splits(
     step: int = 5,
 ):
     if window > 0:
-        # Path C: Temporal DL (Chronological split, Imputation, Scaling, Windowing)
-        n_total = len(X)
-        train_end = int(n_total * train_ratio)
-        val_end = int(n_total * (train_ratio + val_ratio))
-        
-        X_train = X.iloc[:train_end].copy()
-        y_train = y.iloc[:train_end].copy()
-        
-        X_val = X.iloc[train_end:val_end].copy()
-        y_val = y.iloc[train_end:val_end].copy()
-        
-        X_test = X.iloc[val_end:].copy()
-        y_test = y.iloc[val_end:].copy()
+        # Path C v2: Extract windows first, then apply stratified split
+        X_temp = X.copy()
         
         if scale_and_impute:
-            train_median = X_train.median()
-            X_train = X_train.fillna(train_median)
-            X_val = X_val.fillna(train_median)
-            X_test = X_test.fillna(train_median)
-            
+            median_vals = X_temp.median()
+            X_temp = X_temp.fillna(median_vals)
             scaler = StandardScaler()
-            X_train_s = pd.DataFrame(scaler.fit_transform(X_train), columns=FEATURES)
-            X_val_s = pd.DataFrame(scaler.transform(X_val), columns=FEATURES)
-            X_test_s = pd.DataFrame(scaler.transform(X_test), columns=FEATURES)
+            X_scaled = pd.DataFrame(scaler.fit_transform(X_temp), columns=FEATURES)
         else:
-            X_train_s, X_val_s, X_test_s, scaler = X_train, X_val, X_test, None
-
-        def _make_windowed(X_df, y_series):
-            df_temp = X_df.copy()
-            df_temp["fault_label"] = y_series.values
-            return engineer_features(df_temp, window=window, step=step)
-
-        X_train_w, y_train_w = _make_windowed(X_train_s, y_train)
-        X_val_w, y_val_w = _make_windowed(X_val_s, y_val)
-        X_test_w, y_test_w = _make_windowed(X_test_s, y_test)
+            X_scaled = X_temp
+            scaler = None
+            
+        df_window = X_scaled.copy()
+        df_window["fault_label"] = y.values
+        X_w, y_w = engineer_features(df_window, window=window, step=step)
+        
+        test_val_ratio = val_ratio + test_ratio
+        X_train_w, X_temp_w, y_train_w, y_temp_w = train_test_split(
+            X_w, y_w, test_size=test_val_ratio, random_state=random_state, stratify=y_w
+        )
+        
+        val_size_adjusted = val_ratio / test_val_ratio
+        X_val_w, X_test_w, y_val_w, y_test_w = train_test_split(
+            X_temp_w, y_temp_w, test_size=val_size_adjusted, random_state=random_state, stratify=y_temp_w
+        )
         
         return X_train_w, X_val_w, X_test_w, y_train_w, y_val_w, y_test_w, scaler
 
@@ -446,6 +448,173 @@ def sweep_tabnet(X, y):
     return best
 
 
+def sweep_cnn(X, y, num_classes: int):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    total = (
+        len(SPLIT_CONFIGS) * len(CNN_EPOCHS) * len(CNN_CONV_CHANNELS_LIST)
+        * len(CNN_HIDDEN_DIMS) * len(CNN_KERNEL_SIZES) * len(CNN_LR_LIST)
+    )
+    print(f"\n=== CNN sweep ({len(SPLIT_CONFIGS)} splits × {len(CNN_EPOCHS)} × "
+          f"{len(CNN_CONV_CHANNELS_LIST)} × {len(CNN_HIDDEN_DIMS)} × "
+          f"{len(CNN_KERNEL_SIZES)} × {len(CNN_LR_LIST)} = {total} configs) on {device} ===")
+    if device.type == "cuda":
+        print(f"[env] {torch.cuda.get_device_name(0)}")
+
+    best = {"f1": -1.0}
+    config_idx = 0
+    input_dim = len(FEATURES)
+    cnn_window_size = CNN_WINDOW_SIZE
+
+    for tr, vr, te in SPLIT_CONFIGS:
+        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(
+            X, y, tr, vr, te, scale_and_impute=True, window=cnn_window_size,
+        )
+
+        unique_classes = np.unique(y_train)
+        weights = compute_class_weight(class_weight="balanced", classes=unique_classes, y=y_train)
+        class_weights = torch.tensor(weights, dtype=torch.float32, device=device)
+
+        X_train_t = torch.tensor(X_train, dtype=torch.float32, device=device)
+        X_val_t = torch.tensor(X_val, dtype=torch.float32, device=device)
+        y_train_t = torch.tensor(y_train, dtype=torch.long, device=device)
+        y_val_np = y_val
+
+        loader = DataLoader(
+            TensorDataset(X_train_t, y_train_t), batch_size=CNN_BATCH_SIZE, shuffle=True,
+        )
+
+        for n_epochs in CNN_EPOCHS:
+            for conv_channels in CNN_CONV_CHANNELS_LIST:
+                for hidden_dim in CNN_HIDDEN_DIMS:
+                    for kernel_size in CNN_KERNEL_SIZES:
+                        for lr in CNN_LR_LIST:
+                            config_idx += 1
+                            t0 = time.time()
+                            model = CNNClassifier(
+                                input_dim=input_dim,
+                                num_classes=num_classes,
+                                window_size=cnn_window_size,
+                                conv_channels=conv_channels,
+                                kernel_size=kernel_size,
+                                hidden_dim=hidden_dim,
+                                dropout=CNN_DROPOUT,
+                            ).to(device)
+                            optimizer = torch.optim.Adam(
+                                model.parameters(), lr=lr, weight_decay=1e-4,
+                            )
+                            loss_fn = nn.CrossEntropyLoss(weight=class_weights)
+
+                            model.train()
+                            for _ in range(n_epochs):
+                                for X_batch, y_batch in loader:
+                                    optimizer.zero_grad()
+                                    logits = model(X_batch)
+                                    loss = loss_fn(logits, y_batch)
+                                    loss.backward()
+                                    optimizer.step()
+
+                            model.eval()
+                            with torch.no_grad():
+                                val_logits = model(X_val_t)
+                                y_pred = torch.argmax(F.softmax(val_logits, dim=-1), dim=-1).cpu().numpy()
+                            acc = float(accuracy_score(y_val_np, y_pred))
+                            f1 = float(f1_score(y_val_np, y_pred, average="macro"))
+                            precision = float(precision_score(y_val_np, y_pred, average="macro", zero_division=0))
+
+                            if f1 > best["f1"]:
+                                best = {
+                                    "model": "CNN", "split": split_label(tr, vr, te),
+                                    "param": f"epochs={n_epochs}, conv_channels={conv_channels}, "
+                                             f"hidden={hidden_dim}, kernel={kernel_size}, lr={lr}",
+                                    "param_dict": {
+                                        "epochs": n_epochs,
+                                        "conv_channels": conv_channels,
+                                        "hidden_dim": hidden_dim,
+                                        "kernel_size": kernel_size,
+                                        "lr": lr,
+                                        "dropout": CNN_DROPOUT,
+                                        "window": cnn_window_size,
+                                    },
+                                    "accuracy": acc,
+                                    "f1": f1,
+                                    "precision": precision,
+                                    "auroc": None,
+                                    "state_dict": {k: v.cpu().clone() for k, v in model.state_dict().items()},
+                                    "scaler": scaler,
+                                    "split_tuple": (tr, vr, te),
+                                }
+                            print(
+                                f"[{config_idx:>3}/{total}] split={split_label(tr,vr,te):<10} "
+                                f"epochs={n_epochs:<3} cc={conv_channels:<3} h={hidden_dim:<3} "
+                                f"k={kernel_size:<3} lr={lr:<6} acc={acc:.4f} f1={f1:.4f} "
+                                f"({time.time()-t0:.1f}s)"
+                            )
+
+    print(f"--- best CNN: {best['split']}  {best['param']}  f1={best['f1']:.4f}")
+    return best, device
+
+
+def save_cnn_artifact(best: dict, device: torch.device, num_classes: int,
+                      demo_holdout: pd.DataFrame):
+    out_dir = MODELS_ROOT / "cnn"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    p = best["param_dict"]
+
+    final_model = CNNClassifier(
+        input_dim=len(FEATURES),
+        num_classes=num_classes,
+        window_size=p.get("window", 1),
+        conv_channels=p["conv_channels"],
+        kernel_size=p["kernel_size"],
+        hidden_dim=p["hidden_dim"],
+        dropout=p["dropout"],
+    ).to(device)
+    final_model.load_state_dict(best["state_dict"])
+    final_model.eval()
+
+    X_holdout = pd.DataFrame(best["scaler"].transform(demo_holdout[FEATURES]), columns=FEATURES)
+    df_holdout = X_holdout.copy()
+    df_holdout["fault_label"] = demo_holdout["fault_label"].astype(int).values
+    X_holdout_w, y_holdout = engineer_features(
+        df_holdout, window=p["window"], step=5,
+    )
+    X_holdout_t = torch.tensor(X_holdout_w, dtype=torch.float32, device=device)
+
+    with torch.no_grad():
+        holdout_logits = final_model(X_holdout_t)
+        y_pred = torch.argmax(F.softmax(holdout_logits, dim=-1), dim=-1).cpu().numpy()
+
+    test_metrics = _final_report(y_holdout, y_pred, "CNN (demo holdout)")
+
+    pth_path = out_dir / "best_cnn.pth"
+    torch.save(best["state_dict"], pth_path)
+
+    metadata = {
+        "model_name": "best_cnn.pth",
+        "model_family": "cnn_pytorch",
+        "trained_on_dataset": "dtx_ai_master_dataset.csv",
+        "feature_count": len(FEATURES),
+        "num_classes": len(CLASS_NAMES),
+        "feature_order_ref": "services/ai/models/shared/feature_order.json",
+        "scaler_required": True,
+        "class_mapping": {str(i): n for i, n in enumerate(CLASS_NAMES)},
+        "training_split": best["split"],
+        "best_params": best["param_dict"],
+        "metrics": {
+            "val_accuracy": round(best["accuracy"], 6),
+            "val_f1": round(best["f1"], 6),
+            "val_precision": round(best["precision"], 6),
+            **{k: round(v, 6) for k, v in test_metrics.items()},
+        },
+        "decision_type": "multiclass_classifier",
+        "default_threshold": 0.5,
+        "supports_tree_xai": False,
+        "notes": "Trained via scripts/train_models.py — CNN classifier saved as ai.cnn_classifier.CNNClassifier.",
+    }
+    (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    print(f"[save] {pth_path}  +  metadata.json")
+
+
 # ── Saving ─────────────────────────────────────────────────────────────────
 def _final_report(y_true, y_pred, label: str) -> dict[str, float]:
     seen = sorted(set(int(v) for v in list(y_true) + list(y_pred)))
@@ -693,6 +862,10 @@ def main():
     # TabNet sweep.
     best_tabnet = sweep_tabnet(X, y)
     save_tabnet_artifact(best_tabnet, demo_holdout)
+
+    # CNN sweep.
+    best_cnn, device = sweep_cnn(X, y, num_classes)
+    save_cnn_artifact(best_cnn, device, num_classes, demo_holdout)
 
     # Cell 8 — LSTM-AE+CLS sweep.
     best_lstm, device = sweep_lstm_ae(X, y, num_classes)
