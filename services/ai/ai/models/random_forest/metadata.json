@@ -1,7 +1,7 @@
 {
   "model_name": "best_rf.pkl",
   "model_family": "random_forest",
-  "trained_on_dataset": "ziya07/industrial-iot-fault-detection-dataset",
+  "trained_on_dataset": "dtx_ai_master_dataset.csv",
   "feature_count": 19,
   "num_classes": 6,
   "feature_order_ref": "services/ai/models/shared/feature_order.json",
@@ -14,19 +14,19 @@
     "4": "pressure_fault",
     "5": "wheel_slip"
   },
-  "training_split": "80/10/10",
+  "training_split": "60/10/30",
   "best_params": {
-    "n_estimators": 100,
+    "n_estimators": 200,
     "max_depth": 5
   },
   "metrics": {
-    "val_accuracy": 0.998844,
-    "val_f1": 0.998843,
-    "val_precision": 0.998851,
-    "val_auroc": 0.99999,
-    "test_accuracy": 0.998148,
-    "test_f1": 0.998147,
-    "test_precision": 0.998156
+    "val_accuracy": 0.304861,
+    "val_f1": 0.36926,
+    "val_precision": 0.684374,
+    "val_auroc": 0.744592,
+    "test_accuracy": 0.303973,
+    "test_f1": 0.369957,
+    "test_precision": 0.692638
   },
   "decision_type": "multiclass_classifier",
   "default_threshold": null,

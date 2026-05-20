@@ -1,0 +1,39 @@
+{
+  "model_name": "best_cnn.pth",
+  "model_family": "cnn_pytorch",
+  "trained_on_dataset": "dtx_ai_master_dataset.csv",
+  "feature_count": 19,
+  "num_classes": 6,
+  "feature_order_ref": "services/ai/models/shared/feature_order.json",
+  "scaler_required": true,
+  "class_mapping": {
+    "0": "nominal",
+    "1": "bearing_wear",
+    "2": "overheat",
+    "3": "overload",
+    "4": "pressure_fault",
+    "5": "wheel_slip"
+  },
+  "training_split": "80/10/10",
+  "best_params": {
+    "epochs": 40,
+    "conv_channels": 32,
+    "hidden_dim": 32,
+    "kernel_size": 5,
+    "lr": 0.001,
+    "dropout": 0.1,
+    "window": 30
+  },
+  "metrics": {
+    "val_accuracy": 0.455652,
+    "val_f1": 0.471202,
+    "val_precision": 0.557173,
+    "test_accuracy": 0.382845,
+    "test_f1": 0.397858,
+    "test_precision": 0.463265
+  },
+  "decision_type": "multiclass_classifier",
+  "default_threshold": 0.5,
+  "supports_tree_xai": false,
+  "notes": "Trained via scripts/train_models.py \u2014 CNN classifier saved as ai.cnn_classifier.CNNClassifier."
+}
