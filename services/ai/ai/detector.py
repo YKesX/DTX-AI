@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import os
 import sys
 from pathlib import Path
@@ -57,6 +58,18 @@ _RULE_THRESHOLDS = {
     "vibration_magnitude": 15.0,  # nominal ~9.8, faults around the same — weak signal
 }
 
+# CNN requires sliding window buffer to accumulate 30 timesteps of context.
+# Buffer lifecycle:
+#  - Production (default): accumulates streaming sensor events, CNN uses full 30-step context
+#  - Testing (strict_replay): buffer bypassed, single-event evaluation for determinism
+#  - Dashboard/demo: reset_cnn_buffer() called before test suite
+_CNN_BUFFER = collections.deque(maxlen=30)
+
+
+def reset_cnn_buffer() -> None:
+    """Clear CNN buffer for testing or dashboard use. Call before non-production workflows."""
+    _CNN_BUFFER.clear()
+
 
 def _feature_vector(event: EventIn) -> list[float]:
     """Extract the 19 sensor channels in canonical FEATURES order."""
@@ -88,9 +101,13 @@ def _run_tree_model(event: EventIn, runtime: RuntimeModel) -> AnomalyResult:
         x = pd.DataFrame(x, columns=_feature_columns(runtime, x.shape[1]))
 
     model = runtime.model
-    pred_class = int(model.predict(x)[0])
+    
+    # TabNet explicitly requires numpy arrays; tree models use DataFrames.
+    x_input = x.values if runtime.family == "tabnet_pytorch" else x
+
+    pred_class = int(model.predict(x_input)[0])
     if hasattr(model, "predict_proba"):
-        probs = model.predict_proba(x)[0]
+        probs = model.predict_proba(x_input)[0]
         anomaly_score = float(max(probs[1:])) if len(probs) > 1 else float(probs[0])
     else:
         anomaly_score = float(pred_class != 0)
@@ -157,6 +174,97 @@ def _run_lstm_autoencoder(event: EventIn, runtime: RuntimeModel) -> AnomalyResul
     metadata["lstm_raw_logits"] = {
         str(i): round(float(lg.item()), 6) for i, lg in enumerate(logits[0])
     }
+    event.metadata = metadata
+
+    return AnomalyResult(
+        event_id=event.event_id,
+        anomaly_score=round(min(max(class_confidence, 0.0), 1.0), 4),
+        is_anomaly=is_anomaly,
+        anomaly_type=anomaly_type,
+        severity=severity,
+    )
+
+
+def _run_cnn_model(event: EventIn, runtime: RuntimeModel) -> AnomalyResult:
+    try:
+        import torch
+        import torch.nn.functional as F
+    except Exception:
+        return _rule_based_detect(event)
+
+    model = runtime.model
+    if model is None:
+        return _rule_based_detect(event)
+
+    features = _feature_vector(event)
+
+    # Window size used both for production buffer and for replay_history validation.
+    window_size = int(runtime.metadata.get("best_params", {}).get("window", 30))
+
+    # Strict replay mode: use an isolated replay_history provided by the caller
+    metadata = event.metadata if isinstance(event.metadata, dict) else {}
+    strict_replay = bool(
+        os.getenv("DTX_REPLAY_STRICT", "0") == "1"
+        or metadata.get("replay_strict") is True
+    )
+
+    if strict_replay:
+        # Expect caller to pass an isolated history matching training window length.
+        replay_history = metadata.get("replay_history")
+        if not replay_history or len(replay_history) < window_size:
+            # Test didn't provide sufficient history: fall back to rule-based detector
+            return _rule_based_detect(event)
+
+        # Use the last `window_size` rows from the provided history only — do NOT touch global buffer.
+        history_data = replay_history[-window_size:]
+        x_history = pd.DataFrame(history_data, columns=_feature_columns(runtime, len(features)))
+        if runtime.scaler is not None:
+            x_array = runtime.scaler.transform(x_history)
+        else:
+            x_array = x_history.values
+
+        tensor = torch.tensor(x_array, dtype=torch.float32).unsqueeze(0)
+        # Debug metadata for tests/dashboards
+        metadata["cnn_used_replay_history"] = True
+        metadata["cnn_replay_history_len"] = len(replay_history)
+    else:
+        # Production mode: accumulate sliding window context.
+        _CNN_BUFFER.append(features)
+
+        if len(_CNN_BUFFER) < window_size:
+            # Insufficient context: model trained on window steps. Fall back to rules.
+            return _rule_based_detect(event)
+
+        x_history = pd.DataFrame(list(_CNN_BUFFER), columns=_feature_columns(runtime, len(features)))
+        if runtime.scaler is not None:
+            x_array = runtime.scaler.transform(x_history)
+        else:
+            x_array = x_history.values
+
+        # Shape: [1, window_size, features] — exactly as trained in train_models.py.
+        tensor = torch.tensor(x_array, dtype=torch.float32).unsqueeze(0)
+
+    with torch.no_grad():
+        logits = model(tensor)
+        probs = F.softmax(logits, dim=-1)[0]
+        pred_class = int(torch.argmax(probs).item())
+        class_confidence = float(probs[pred_class].item())
+
+    anomaly_type, severity = _CLASS_MAP.get(pred_class, (AnomalyType.UNKNOWN, Severity.WARNING))
+    threshold = runtime.metadata.get("default_threshold")
+    threshold = float(threshold) if threshold is not None else _ANOMALY_THRESHOLD
+    is_anomaly = pred_class != 0 and class_confidence >= threshold
+    if not is_anomaly:
+        anomaly_type, severity = AnomalyType.NOMINAL, Severity.INFO
+
+    metadata = event.metadata if isinstance(event.metadata, dict) else {}
+    metadata["cnn_predicted_class"] = pred_class
+    metadata["cnn_class_confidence"] = round(class_confidence, 6)
+    metadata["cnn_raw_logits"] = {
+        str(i): round(float(lg.item()), 6) for i, lg in enumerate(logits[0])
+    }
+    if not strict_replay:
+        metadata["cnn_buffer_size"] = len(_CNN_BUFFER)  # Debug: show accumulated context
     event.metadata = metadata
 
     return AnomalyResult(
@@ -296,6 +404,15 @@ def detect(event: EventIn) -> AnomalyResult:
     if runtime.family in {"lightgbm", "random_forest", "xgboost", "tabnet_pytorch"}:
         try:
             result = _run_tree_model(event, runtime)
+            return result
+        except Exception:
+            if strict_replay:
+                raise
+            return fallback
+
+    if runtime.family == "cnn_pytorch":
+        try:
+            result = _run_cnn_model(event, runtime)
             return result
         except Exception:
             if strict_replay:
