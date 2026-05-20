@@ -52,6 +52,14 @@
       "metadata_path": "services/ai/models/tabnet/metadata.json",
       "requires_scaler": true,
       "supports_tree_xai": false
+    },
+    "bilstm": {
+      "enabled": true,
+      "family": "bilstm_pytorch",
+      "path": "services/ai/models/bilstm/best_bilstm.pth",
+      "metadata_path": "services/ai/models/bilstm/metadata.json",
+      "requires_scaler": true,
+      "supports_tree_xai": false
     }
   }
 }
