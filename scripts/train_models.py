@@ -49,7 +49,9 @@ from sklearn.metrics import (
     precision_score,
     roc_auc_score,
 )
+from sklearn.impute import SimpleImputer
 from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
 from torch.utils.data import DataLoader, TensorDataset
@@ -71,6 +73,13 @@ from preprocessing import (  # noqa: E402
     load_data,
     split_training_pool_and_holdout,
 )
+
+
+def build_scaling_pipeline() -> Pipeline:
+    return Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
+    ])
 from ai.lstm_classifier import LSTMAutoencoderClassifier  # noqa: E402
 from ai.cnn_classifier import CNNClassifier  # noqa: E402
 from ai.bilstm_classifier import BiLSTMClassifier  # noqa: E402
@@ -137,10 +146,10 @@ def prepare_splits(
         X_temp = X.copy()
         
         if scale_and_impute:
-            median_vals = X_temp.median()
-            X_temp = X_temp.fillna(median_vals)
-            scaler = StandardScaler()
-            X_scaled = pd.DataFrame(scaler.fit_transform(X_temp), columns=FEATURES)
+            scaler = build_scaling_pipeline()
+            X_scaled = pd.DataFrame(
+                scaler.fit_transform(X_temp), columns=FEATURES, index=X_temp.index
+            )
         else:
             X_scaled = X_temp
             scaler = None
@@ -171,15 +180,16 @@ def prepare_splits(
         random_state=random_state, stratify=y_temp,
     )
     if scale_and_impute:
-        train_median = X_train.median()
-        X_train = X_train.fillna(train_median)
-        X_val = X_val.fillna(train_median)
-        X_test = X_test.fillna(train_median)
-
-        scaler = StandardScaler()
-        X_train_s = pd.DataFrame(scaler.fit_transform(X_train), columns=FEATURES)
-        X_val_s = pd.DataFrame(scaler.transform(X_val), columns=FEATURES)
-        X_test_s = pd.DataFrame(scaler.transform(X_test), columns=FEATURES)
+        scaler = build_scaling_pipeline()
+        X_train_s = pd.DataFrame(
+            scaler.fit_transform(X_train), columns=FEATURES, index=X_train.index
+        )
+        X_val_s = pd.DataFrame(
+            scaler.transform(X_val), columns=FEATURES, index=X_val.index
+        )
+        X_test_s = pd.DataFrame(
+            scaler.transform(X_test), columns=FEATURES, index=X_test.index
+        )
         return X_train_s, X_val_s, X_test_s, y_train, y_val, y_test, scaler
     else:
         return X_train, X_val, X_test, y_train, y_val, y_test, None
@@ -768,11 +778,21 @@ def save_tabnet_artifact(best: dict, demo_holdout: pd.DataFrame):
     out_dir = MODELS_ROOT / "tabnet"
     out_dir.mkdir(parents=True, exist_ok=True)
     
-    X_holdout = pd.DataFrame(best["scaler"].transform(demo_holdout[FEATURES]), columns=FEATURES)
+    X_holdout = demo_holdout[FEATURES].copy()
+    if best["scaler"] is not None:
+        X_holdout = pd.DataFrame(best["scaler"].transform(X_holdout), columns=FEATURES)
     y_holdout = demo_holdout["fault_label"].astype(int).values
     
-    y_pred = best["model_obj"].predict(X_holdout)
-    test_metrics = _final_report(y_holdout, y_pred, "TabNet (demo holdout)")
+    try:
+        y_pred = best["model_obj"].predict(X_holdout)
+        test_metrics = _final_report(y_holdout, y_pred, "TabNet (demo holdout)")
+    except Exception as exc:
+        print(f"[save] TabNet demo holdout evaluation skipped due to exception: {exc}")
+        test_metrics = {
+            "test_accuracy": None,
+            "test_f1": None,
+            "test_precision": None,
+        }
     
     best["model_obj"].save_model(str(out_dir / "best_tabnet"))
     artifact_name = "best_tabnet.zip"
@@ -792,7 +812,7 @@ def save_tabnet_artifact(best: dict, demo_holdout: pd.DataFrame):
             "val_accuracy": round(best["accuracy"], 6),
             "val_f1": round(best["f1"], 6),
             "val_precision": round(best["precision"], 6),
-            **{k: round(v, 6) for k, v in test_metrics.items()},
+            **{k: (None if v is None else round(v, 6)) for k, v in test_metrics.items()},
         },
         "decision_type": "multiclass_classifier",
         "default_threshold": 0.5,
@@ -939,7 +959,27 @@ def save_overall_best(best_rf, best_lgbm, best_xgb, best_tabnet, best_cnn, best_
     print(f"\n=== Global Winner: {overall_name} (F1: {overall['f1']:.4f}) ===")
     
     if overall_name in ["TabNet", "LSTM-AE"]:
-        print(f"[{overall_name}] Best model already saved during sweep. No Re-training needed.")
+        # No train+val retraining for these two; the per-family save_*_artifact step
+        # already wrote the best model. Still mirror the winner's scaler and
+        # feature_order into shared/ (the runtime loader reads from there), plus
+        # a convenience copy of the model artifact under shared/model_best.*.
+        SHARED_DIR.mkdir(parents=True, exist_ok=True)
+        winner_scaler = overall.get("scaler")
+        if winner_scaler is not None:
+            joblib.dump(winner_scaler, SHARED_DIR / "scaler.pkl")
+        (SHARED_DIR / "feature_order.json").write_text(json.dumps(FEATURES, indent=2) + "\n")
+
+        if overall_name == "TabNet":
+            import shutil
+            src = MODELS_ROOT / "tabnet" / "best_tabnet.zip"
+            if src.exists():
+                shutil.copyfile(src, SHARED_DIR / "model_best.zip")
+            print(f"[save] {SHARED_DIR}/model_best.zip  +  scaler.pkl  +  feature_order.json")
+        else:  # LSTM-AE
+            torch.save(overall["state_dict"], SHARED_DIR / "model_best.pth")
+            print(f"[save] {SHARED_DIR}/model_best.pth  +  scaler.pkl  +  feature_order.json")
+
+        print(f"[{overall_name}] No train+val retrain — sweep artifact reused for shared/.")
         return overall_name
 
     tr, vr, te = overall["split_tuple"]
@@ -1019,7 +1059,7 @@ def save_overall_best(best_rf, best_lgbm, best_xgb, best_tabnet, best_cnn, best_
                 input_dim=len(FEATURES), num_classes=num_classes, window_size=window_size,
                 hidden_dim=p["hidden_dim"], num_layers=p["num_layers"], dropout=p["dropout"],
             ).to(device)
-            epochs = 100
+            epochs = int(p.get("epochs", 100))
             lr = p.get("lr", 0.005)
             batch_size = 64
 
