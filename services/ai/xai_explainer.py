@@ -125,11 +125,17 @@ def _compute_top_features(
     top_k: int = 3,
 ) -> List[Dict[str, Any]]:
     X_scaled_df = _build_input_dataframe(input_features)
-    explainer = shap.TreeExplainer(model)
-    shap_output = explainer.shap_values(X_scaled_df)
 
-    class_idx = CLASS_INDEX_MAP.get(anomaly_class, 0)
-    shap_values_for_class = _extract_class_shap_values(shap_output, class_idx)
+    if hasattr(model, "explain") and type(model).__name__ == "TabNetClassifier":
+        # Native TabNet XAI (attention masks)
+        res_explain, _ = model.explain(X_scaled_df.values)
+        shap_values_for_class = np.abs(res_explain[0])
+    else:
+        # Standard TreeExplainer for LightGBM, XGBoost, Random Forest
+        explainer = shap.TreeExplainer(model)
+        shap_output = explainer.shap_values(X_scaled_df)
+        class_idx = CLASS_INDEX_MAP.get(anomaly_class, 0)
+        shap_values_for_class = _extract_class_shap_values(shap_output, class_idx)
 
     top_indices = np.argsort(shap_values_for_class)[-top_k:][::-1]
     return [

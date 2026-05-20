@@ -119,6 +119,78 @@ def _load_lstm_runtime_model(model_path: Path, metadata: dict[str, Any]) -> Any:
     return model
 
 
+def _load_tabnet_runtime_model(model_path: Path) -> Any:
+    try:
+        from pytorch_tabnet.tab_model import TabNetClassifier
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError(f"pytorch-tabnet unavailable: {exc}") from exc
+    
+    model = TabNetClassifier()
+    # TabNet's load_model expects a string path, optionally without the .zip extension,
+    # but providing the exact path works.
+    model.load_model(str(model_path))
+    return model
+
+
+def _load_cnn_runtime_model(model_path: Path, metadata: dict[str, Any]) -> Any:
+    try:
+        import torch
+    except Exception as exc:  # pragma: no cover - dependency optional
+        raise RuntimeError(f"PyTorch unavailable: {exc}") from exc
+
+    from ai.cnn_classifier import CNNClassifier
+
+    feature_dim = int(metadata.get("feature_count", DEFAULT_FEATURE_COUNT))
+    num_classes = int(metadata.get("num_classes", len(metadata.get("class_mapping", {})) or 2))
+    params = metadata.get("best_params", {})
+    window_size = int(params.get("window", 1))
+    conv_channels = int(params.get("conv_channels", 32))
+    hidden_dim = int(params.get("hidden_dim", 64))
+    kernel_size = int(params.get("kernel_size", 3))
+    dropout = float(params.get("dropout", 0.1))
+
+    model = CNNClassifier(
+        input_dim=feature_dim,
+        num_classes=num_classes,
+        window_size=window_size,
+        conv_channels=conv_channels,
+        kernel_size=kernel_size,
+        hidden_dim=hidden_dim,
+        dropout=dropout,
+    )
+    state_dict = torch.load(model_path, map_location="cpu")
+    model.load_state_dict(state_dict, strict=True)
+    model.eval()
+    model.eval()
+    return model
+
+
+def _load_bilstm_runtime_model(model_path: Path, metadata: dict[str, Any]) -> Any:
+    try:
+        import torch
+    except Exception as exc:
+        raise RuntimeError(f"PyTorch unavailable: {exc}") from exc
+
+    from ai.bilstm_classifier import BiLSTMClassifier
+
+    feature_dim = int(metadata.get("feature_count", DEFAULT_FEATURE_COUNT))
+    num_classes = int(metadata.get("num_classes", len(metadata.get("class_mapping", {})) or 2))
+    params = metadata.get("best_params", {})
+    
+    model = BiLSTMClassifier(
+        input_dim=feature_dim,
+        num_classes=num_classes,
+        window_size=int(params.get("window", 30)),
+        hidden_dim=int(params.get("hidden_dim", 64)),
+        num_layers=int(params.get("num_layers", 2)),
+        dropout=float(params.get("dropout", 0.3)),
+    )
+    state_dict = torch.load(model_path, map_location="cpu")
+    model.load_state_dict(state_dict, strict=True)
+    model.eval()
+    return model
+
+
 def load_runtime_model(
     requested_model: str | None = None,
     strict_selection: bool = False,
@@ -175,6 +247,12 @@ def load_runtime_model(
 
             if family == "lstm_autoencoder_pytorch":
                 model = _load_lstm_runtime_model(model_path, metadata)
+            elif family == "tabnet_pytorch":
+                model = _load_tabnet_runtime_model(model_path)
+            elif family == "cnn_pytorch":
+                model = _load_cnn_runtime_model(model_path, metadata)
+            elif family == "bilstm_pytorch":
+                model = _load_bilstm_runtime_model(model_path, metadata)
             else:
                 model = joblib.load(model_path)
 

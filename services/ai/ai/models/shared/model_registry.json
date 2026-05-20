@@ -36,6 +36,30 @@
       "metadata_path": "services/ai/models/xgboost/metadata.json",
       "requires_scaler": true,
       "supports_tree_xai": true
+    },
+    "cnn": {
+      "enabled": true,
+      "family": "cnn_pytorch",
+      "path": "services/ai/models/cnn/best_cnn.pth",
+      "metadata_path": "services/ai/models/cnn/metadata.json",
+      "requires_scaler": true,
+      "supports_tree_xai": false
+    },
+    "tabnet": {
+      "enabled": true,
+      "family": "tabnet_pytorch",
+      "path": "services/ai/models/tabnet/best_tabnet.zip",
+      "metadata_path": "services/ai/models/tabnet/metadata.json",
+      "requires_scaler": true,
+      "supports_tree_xai": false
+    },
+    "bilstm": {
+      "enabled": true,
+      "family": "bilstm_pytorch",
+      "path": "services/ai/models/bilstm/best_bilstm.pth",
+      "metadata_path": "services/ai/models/bilstm/metadata.json",
+      "requires_scaler": true,
+      "supports_tree_xai": false
     }
   }
 }
