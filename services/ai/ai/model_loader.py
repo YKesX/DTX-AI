@@ -161,6 +161,33 @@ def _load_cnn_runtime_model(model_path: Path, metadata: dict[str, Any]) -> Any:
     state_dict = torch.load(model_path, map_location="cpu")
     model.load_state_dict(state_dict, strict=True)
     model.eval()
+    model.eval()
+    return model
+
+
+def _load_bilstm_runtime_model(model_path: Path, metadata: dict[str, Any]) -> Any:
+    try:
+        import torch
+    except Exception as exc:
+        raise RuntimeError(f"PyTorch unavailable: {exc}") from exc
+
+    from ai.bilstm_classifier import BiLSTMClassifier
+
+    feature_dim = int(metadata.get("feature_count", DEFAULT_FEATURE_COUNT))
+    num_classes = int(metadata.get("num_classes", len(metadata.get("class_mapping", {})) or 2))
+    params = metadata.get("best_params", {})
+    
+    model = BiLSTMClassifier(
+        input_dim=feature_dim,
+        num_classes=num_classes,
+        window_size=int(params.get("window", 30)),
+        hidden_dim=int(params.get("hidden_dim", 64)),
+        num_layers=int(params.get("num_layers", 2)),
+        dropout=float(params.get("dropout", 0.3)),
+    )
+    state_dict = torch.load(model_path, map_location="cpu")
+    model.load_state_dict(state_dict, strict=True)
+    model.eval()
     return model
 
 
@@ -224,6 +251,8 @@ def load_runtime_model(
                 model = _load_tabnet_runtime_model(model_path)
             elif family == "cnn_pytorch":
                 model = _load_cnn_runtime_model(model_path, metadata)
+            elif family == "bilstm_pytorch":
+                model = _load_bilstm_runtime_model(model_path, metadata)
             else:
                 model = joblib.load(model_path)
 

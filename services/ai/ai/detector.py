@@ -64,11 +64,13 @@ _RULE_THRESHOLDS = {
 #  - Testing (strict_replay): buffer bypassed, single-event evaluation for determinism
 #  - Dashboard/demo: reset_cnn_buffer() called before test suite
 _CNN_BUFFER = collections.deque(maxlen=30)
+_BILSTM_BUFFER = collections.deque(maxlen=30)
 
 
-def reset_cnn_buffer() -> None:
-    """Clear CNN buffer for testing or dashboard use. Call before non-production workflows."""
+def reset_all_buffers() -> None:
+    """Clear all deep learning buffers for testing or dashboard use. Call before non-production workflows."""
     _CNN_BUFFER.clear()
+    _BILSTM_BUFFER.clear()
 
 
 def _feature_vector(event: EventIn) -> list[float]:
@@ -276,6 +278,79 @@ def _run_cnn_model(event: EventIn, runtime: RuntimeModel) -> AnomalyResult:
     )
 
 
+def _run_bilstm_model(event: EventIn, runtime: RuntimeModel) -> AnomalyResult:
+    try:
+        import torch
+        import torch.nn.functional as F
+    except Exception:
+        return _rule_based_detect(event)
+
+    model = runtime.model
+    if model is None:
+        return _rule_based_detect(event)
+
+    features = _feature_vector(event)
+    window_size = int(runtime.metadata.get("best_params", {}).get("window", 30))
+    metadata = event.metadata if isinstance(event.metadata, dict) else {}
+    strict_replay = bool(
+        os.getenv("DTX_REPLAY_STRICT", "0") == "1"
+        or metadata.get("replay_strict") is True
+    )
+
+    if strict_replay:
+        replay_history = metadata.get("replay_history")
+        if not replay_history or len(replay_history) < window_size:
+            return _rule_based_detect(event)
+        history_data = replay_history[-window_size:]
+        x_history = pd.DataFrame(history_data, columns=_feature_columns(runtime, len(features)))
+        if runtime.scaler is not None:
+            x_array = runtime.scaler.transform(x_history)
+        else:
+            x_array = x_history.values
+            
+        tensor = torch.tensor(x_array, dtype=torch.float32).unsqueeze(0)
+        metadata["bilstm_used_replay_history"] = True
+        metadata["bilstm_replay_history_len"] = len(replay_history)
+    else:
+        _BILSTM_BUFFER.append(features)
+        if len(_BILSTM_BUFFER) < window_size:
+            return _rule_based_detect(event)
+        x_history = pd.DataFrame(list(_BILSTM_BUFFER), columns=_feature_columns(runtime, len(features)))
+        if runtime.scaler is not None:
+            x_array = runtime.scaler.transform(x_history)
+        else:
+            x_array = x_history.values
+            
+        tensor = torch.tensor(x_array, dtype=torch.float32).unsqueeze(0)
+
+    with torch.no_grad():
+        logits = model(tensor)
+        probs = F.softmax(logits, dim=-1)[0]
+        pred_class = int(torch.argmax(probs).item())
+        class_confidence = float(probs[pred_class].item())
+
+    anomaly_type, severity = _CLASS_MAP.get(pred_class, (AnomalyType.UNKNOWN, Severity.WARNING))
+    threshold = runtime.metadata.get("default_threshold")
+    threshold = float(threshold) if threshold is not None else _ANOMALY_THRESHOLD
+    is_anomaly = pred_class != 0 and class_confidence >= threshold
+    if not is_anomaly:
+        anomaly_type, severity = AnomalyType.NOMINAL, Severity.INFO
+
+    metadata["bilstm_predicted_class"] = pred_class
+    metadata["bilstm_class_confidence"] = round(class_confidence, 6)
+    if not strict_replay:
+        metadata["bilstm_buffer_size"] = len(_BILSTM_BUFFER)
+    event.metadata = metadata
+
+    return AnomalyResult(
+        event_id=event.event_id,
+        anomaly_score=round(min(max(class_confidence, 0.0), 1.0), 4),
+        is_anomaly=is_anomaly,
+        anomaly_type=anomaly_type,
+        severity=severity,
+    )
+
+
 def _merge_with_guardrails(primary: AnomalyResult, fallback: AnomalyResult) -> AnomalyResult:
     """Combine model output with rule-based fallback. Same contract as before."""
     if fallback.is_anomaly and not primary.is_anomaly:
@@ -413,6 +488,15 @@ def detect(event: EventIn) -> AnomalyResult:
     if runtime.family == "cnn_pytorch":
         try:
             result = _run_cnn_model(event, runtime)
+            return result
+        except Exception:
+            if strict_replay:
+                raise
+            return fallback
+
+    if runtime.family == "bilstm_pytorch":
+        try:
+            result = _run_bilstm_model(event, runtime)
             return result
         except Exception:
             if strict_replay:
