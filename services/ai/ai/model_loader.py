@@ -256,12 +256,13 @@ def load_runtime_model(
             else:
                 model = joblib.load(model_path)
 
+            scaler_required = bool(metadata.get("scaler_required", True))
             runtime = RuntimeModel(
                 key=model_key,
                 family=family,
                 model=model,
                 metadata=metadata,
-                scaler=scaler,
+                scaler=scaler if scaler_required else None,
                 feature_order=feature_order,
                 supports_tree_xai=bool(cfg.get("supports_tree_xai", False)),
                 available=True,

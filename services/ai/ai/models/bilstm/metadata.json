@@ -1,0 +1,22 @@
+{
+  "model_name": "best_bilstm.pth",
+  "model_family": "bilstm_pytorch",
+  "feature_count": 19,
+  "num_classes": 6,
+  "scaler_required": true,
+  "training_split": "80/10/10",
+  "best_params": {
+    "epochs": 100,
+    "hidden_dim": 64,
+    "num_layers": 2,
+    "lr": 0.01,
+    "dropout": 0.3,
+    "window": 30
+  },
+  "metrics": {
+    "val_f1": 0.734314,
+    "test_accuracy": 0.6053,
+    "test_f1": 0.611855,
+    "test_precision": 0.63274
+  }
+}

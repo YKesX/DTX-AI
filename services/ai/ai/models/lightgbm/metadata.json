@@ -1,11 +1,11 @@
 {
   "model_name": "best_lgbm.pkl",
   "model_family": "lightgbm",
-  "trained_on_dataset": "ziya07/industrial-iot-fault-detection-dataset",
+  "trained_on_dataset": "dtx_ai_master_dataset.csv",
   "feature_count": 19,
   "num_classes": 6,
   "feature_order_ref": "services/ai/models/shared/feature_order.json",
-  "scaler_required": true,
+  "scaler_required": false,
   "class_mapping": {
     "0": "nominal",
     "1": "bearing_wear",
@@ -14,20 +14,20 @@
     "4": "pressure_fault",
     "5": "wheel_slip"
   },
-  "training_split": "80/10/10",
+  "training_split": "60/30/10",
   "best_params": {
-    "n_estimators": 200,
-    "max_depth": 5,
-    "learning_rate": 0.01
+    "n_estimators": 100,
+    "max_depth": 3,
+    "learning_rate": 0.1
   },
   "metrics": {
-    "val_accuracy": 1.0,
-    "val_f1": 1.0,
-    "val_precision": 1.0,
-    "val_auroc": 1.0,
-    "test_accuracy": 0.998148,
-    "test_f1": 0.998148,
-    "test_precision": 0.998152
+    "val_accuracy": 0.914679,
+    "val_f1": 0.927412,
+    "val_precision": 0.91282,
+    "val_auroc": 0.995909,
+    "test_accuracy": 0.913448,
+    "test_f1": 0.927245,
+    "test_precision": 0.913921
   },
   "decision_type": "multiclass_classifier",
   "default_threshold": null,

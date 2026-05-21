@@ -1,7 +1,7 @@
 {
   "model_name": "best_lstmae.pth",
   "model_family": "lstm_autoencoder_pytorch",
-  "trained_on_dataset": "ziya07/industrial-iot-fault-detection-dataset",
+  "trained_on_dataset": "dtx_ai_master_dataset.csv",
   "feature_count": 19,
   "num_classes": 6,
   "feature_order_ref": "services/ai/models/shared/feature_order.json",
@@ -19,12 +19,12 @@
     "4": "pressure_fault",
     "5": "wheel_slip"
   },
-  "training_split": "70/10/20",
+  "training_split": "60/10/30",
   "best_params": {
     "epochs": 20,
-    "hidden": 32,
+    "hidden": 64,
     "latent": 16,
-    "lr": 0.001,
+    "lr": 0.01,
     "batch": 64,
     "lambda_recon": 1.0,
     "lambda_cls": 1.0,
@@ -32,13 +32,13 @@
     "weight_decay": 0.0001
   },
   "metrics": {
-    "val_accuracy": 0.997688,
-    "val_f1": 0.997689,
-    "val_precision": 0.997701,
-    "test_accuracy": 0.996759,
-    "test_f1": 0.996757,
-    "test_precision": 0.996764,
-    "test_reconstruction_mse": 1.672373
+    "val_accuracy": 0.611111,
+    "val_f1": 0.594971,
+    "val_precision": 0.859684,
+    "test_accuracy": 0.610586,
+    "test_f1": 0.591437,
+    "test_precision": 0.856637,
+    "test_reconstruction_mse": 16.761198
   },
   "decision_type": "multiclass_classifier_with_reconstruction",
   "default_threshold": 0.5,
