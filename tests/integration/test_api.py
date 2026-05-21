@@ -34,16 +34,16 @@ def _bearing_wear_event(**overrides):
     payload = {
         "asset_id": "test-forklift-01",
         "zone_id": "zone-A",
-        "imu_lin_acc_x": -9.77, "imu_lin_acc_y": 0.0, "imu_lin_acc_z": 0.86,
+        "imu_lin_acc_x": -9.77252, "imu_lin_acc_y": 0.00003, "imu_lin_acc_z": 0.856711,
         "imu_ang_vel_x": 0.0, "imu_ang_vel_y": 0.0, "imu_ang_vel_z": 0.0,
-        "vibration_magnitude": 9.82,
-        "lift_joint_position": -0.15, "lift_force_z": -0.44, "lift_joint_velocity": 0.0,
-        "pseudo_pressure_pa": -5.56,
-        "drive_joint_velocity": 0.0, "drive_joint_effort": 2812.0,
-        "roller_fl_velocity": 0.01, "roller_fr_velocity": 0.0,
-        "roller_bl_velocity": 0.01, "roller_br_velocity": 0.0,
-        "power_dissipated_w": 299.0,
-        "temperature_c": 27.2,
+        "vibration_magnitude": 9.81,
+        "lift_joint_position": -0.045975, "lift_force_z": -738.923773, "lift_joint_velocity": 0.073892,
+        "pseudo_pressure_pa": -9236.5472,
+        "drive_joint_velocity": 0.010401, "drive_joint_effort": 3028.383545,
+        "roller_fl_velocity": 0.017542, "roller_fr_velocity": 0.029011,
+        "roller_bl_velocity": 0.017779, "roller_br_velocity": 0.017592,
+        "power_dissipated_w": 0.0,
+        "temperature_c": 25.5379,
     }
     payload.update(overrides)
     return payload
