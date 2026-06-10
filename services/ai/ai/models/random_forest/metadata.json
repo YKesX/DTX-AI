@@ -1,27 +1,37 @@
 {
   "model_name": "best_rf.pkl",
   "model_family": "random_forest",
-  "trained_on_dataset": "ziya07/industrial-iot-fault-detection-dataset",
-  "feature_count": 9,
+  "trained_at": "2026-06-10T12:08:02+00:00",
+  "trained_on_dataset": "dtx_ai_master_dataset.csv",
+  "feature_count": 19,
+  "num_classes": 6,
   "feature_order_ref": "services/ai/models/shared/feature_order.json",
-  "scaler_required": true,
   "class_mapping": {
-    "0": "no_fault",
-    "1": "bearing_fault",
-    "2": "overheating"
+    "0": "nominal",
+    "1": "bearing_wear",
+    "2": "overheat",
+    "3": "overload",
+    "4": "pressure_fault",
+    "5": "wheel_slip"
   },
-  "training_split": "60/10/30",
+  "training_split": "episode-temporal 60/20/20 (train/val/demo-holdout), purge gap 60 rows",
   "best_params": {
-    "n_estimators": 200,
-    "max_depth": 3
+    "n_estimators": 400,
+    "max_depth": null
   },
+  "leakage_controls": "per-episode temporal split with purge gap; demo holdout is the future tail of every fault run and is never used in training",
+  "scaler_required": true,
+  "scaler_path": "services/ai/models/random_forest/scaler.pkl",
   "metrics": {
-    "accuracy": 0.45,
-    "f1": 0.374059,
-    "precision": 0.376439,
-    "auroc": 0.52594
+    "val_accuracy": 0.992721,
+    "val_f1": 0.993003,
+    "val_precision": 0.993205,
+    "val_auroc": 0.999861,
+    "test_accuracy": 0.99753,
+    "test_f1": 0.997682,
+    "test_precision": 0.997723
   },
   "decision_type": "multiclass_classifier",
   "default_threshold": null,
-  "notes": "Fallback tree model. Not preferred as the first runtime default."
+  "supports_tree_xai": true
 }

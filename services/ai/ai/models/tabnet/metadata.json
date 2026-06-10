@@ -1,0 +1,36 @@
+{
+  "model_name": "best_tabnet.zip",
+  "model_family": "tabnet_pytorch",
+  "trained_at": "2026-06-10T12:08:57+00:00",
+  "trained_on_dataset": "dtx_ai_master_dataset.csv",
+  "feature_count": 19,
+  "num_classes": 6,
+  "feature_order_ref": "services/ai/models/shared/feature_order.json",
+  "class_mapping": {
+    "0": "nominal",
+    "1": "bearing_wear",
+    "2": "overheat",
+    "3": "overload",
+    "4": "pressure_fault",
+    "5": "wheel_slip"
+  },
+  "training_split": "episode-temporal 60/20/20 (train/val/demo-holdout), purge gap 60 rows",
+  "best_params": {
+    "n_d": 16,
+    "n_steps": 2
+  },
+  "leakage_controls": "per-episode temporal split with purge gap; demo holdout is the future tail of every fault run and is never used in training",
+  "scaler_required": true,
+  "scaler_path": "services/ai/models/tabnet/scaler.pkl",
+  "metrics": {
+    "val_accuracy": 0.996713,
+    "val_f1": 0.996862,
+    "val_precision": 0.996938,
+    "test_accuracy": 0.995061,
+    "test_f1": 0.995281,
+    "test_precision": 0.99516
+  },
+  "decision_type": "multiclass_classifier",
+  "default_threshold": 0.5,
+  "supports_tree_xai": false
+}

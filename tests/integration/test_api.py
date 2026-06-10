@@ -1,10 +1,10 @@
-"""
-tests/integration/test_api.py — integration tests for the FastAPI app.
+"""tests/integration/test_api.py — integration tests for the FastAPI app.
 
-Requires:  httpx (pip install httpx pytest-asyncio)
+Requires: ``pip install httpx pytest-asyncio`` (covered by apps/api/requirements.txt).
 """
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../packages"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../services/ai"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../apps/api"))
@@ -14,7 +14,7 @@ import pytest
 try:
     from httpx import AsyncClient, ASGITransport
     from main import app
-    from api.database import init_db
+    from api.database import clear_events, init_db
     from api.live_metrics import live_metrics
     from api.routes.events import _normalize_gt_label
     _HTTPX_AVAILABLE = True
@@ -24,14 +24,63 @@ except ImportError:
 
 pytestmark = pytest.mark.skipif(
     not _HTTPX_AVAILABLE,
-    reason="httpx not installed — run: pip install httpx pytest-asyncio",
+    reason="httpx not installed — run: pip install -r apps/api/requirements.txt",
 )
+
+
+# ── Sensor profiles drawn from the training data's per-class means so the
+#    trained model sees in-distribution inputs and predicts the expected class.
+def _bearing_wear_event(**overrides):
+    payload = {
+        "asset_id": "test-forklift-01",
+        "zone_id": "zone-A",
+        # Per-channel medians of the bearing_wear class in the current
+        # dataset's training pool (services/ai/dtx_ai_master_dataset.csv).
+        "imu_lin_acc_x": -9.7725, "imu_lin_acc_y": -0.0002, "imu_lin_acc_z": 0.8567,
+        "imu_ang_vel_x": -0.0001, "imu_ang_vel_y": 0.0, "imu_ang_vel_z": 0.0,
+        "vibration_magnitude": 9.8101,
+        "lift_joint_position": -0.091, "lift_force_z": -743.1107, "lift_joint_velocity": 0.0743,
+        "pseudo_pressure_pa": -9289.0132,
+        "drive_joint_velocity": 0.0132, "drive_joint_effort": 4669.3109,
+        "roller_fl_velocity": 0.0334, "roller_fr_velocity": 0.0071,
+        "roller_bl_velocity": 0.0416, "roller_br_velocity": 0.0249,
+        "power_dissipated_w": 1902.9497,
+        "temperature_c": 32.3956,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _nominal_event(**overrides):
+    payload = {
+        "asset_id": "test-forklift-02",
+        "zone_id": "zone-A",
+        "imu_lin_acc_x": -9.77, "imu_lin_acc_y": 0.0, "imu_lin_acc_z": 0.86,
+        "imu_ang_vel_x": 0.0, "imu_ang_vel_y": 0.0, "imu_ang_vel_z": 0.0,
+        "vibration_magnitude": 9.81,
+        "lift_joint_position": -0.15, "lift_force_z": 0.31, "lift_joint_velocity": 0.0,
+        "pseudo_pressure_pa": 3.82,
+        "drive_joint_velocity": -0.01, "drive_joint_effort": 3082.0,
+        "roller_fl_velocity": 0.06, "roller_fr_velocity": -0.02,
+        "roller_bl_velocity": 0.07, "roller_br_velocity": 0.01,
+        "power_dissipated_w": 0.0,
+        "temperature_c": 25.15,
+    }
+    payload.update(overrides)
+    return payload
+
+
+_CANONICAL_LABELS = {
+    "nominal", "bearing_wear", "overheat", "overload",
+    "pressure_fault", "wheel_slip", "unknown",
+}
 
 
 @pytest.fixture(autouse=True)
 async def setup_db():
-    """Initialise the SQLite DB before each test (mirrors the lifespan)."""
+    """Initialise the SQLite DB before each test."""
     await init_db()
+    await clear_events()
     live_metrics.reset()
 
 
@@ -45,43 +94,29 @@ async def test_health():
 
 @pytest.mark.asyncio
 async def test_post_event_returns_alert():
-    payload = {
-        "asset_id": "conveyor-belt-01",
-        "zone_id": "zone-A",
-        "vibration": 14.0,
-        "temperature": 80.0,
-        "humidity": 45.0,
-        "pressure": 1012.0,
-    }
+    payload = _bearing_wear_event()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/events/", json=payload)
     assert resp.status_code == 202
     data = resp.json()
     assert "anomaly" in data
     assert "explanation" in data
+    # Bearing-wear profile should classify as a fault, not nominal.
     assert data["anomaly"]["is_anomaly"] is True
 
 
 @pytest.mark.asyncio
 async def test_post_event_dataset_replay_metadata_and_metrics():
-    payload = {
-        "asset_id": "replay-machine-01",
-        "zone_id": "zone-R",
-        "vibration": 16.0,
-        "temperature": 85.0,
-        "humidity": 35.0,
-        "pressure": 1015.0,
-        "metadata": {
-            "source": "dataset_replay",
-            "dataset": "ziya",
-            "split": "test",
-            "row_id": 99,
-            "ground_truth_label": "1",
-            "ground_truth_name": "bearing_fault",
-            "active_model": "random_forest",
-            "replay_strict": False,
-        },
-    }
+    payload = _bearing_wear_event(metadata={
+        "source": "dataset_replay",
+        "dataset": "dtx_ai_master_dataset",
+        "split": "test",
+        "row_id": 99,
+        "ground_truth_label": "1",
+        "ground_truth_name": "bearing_wear",
+        "active_model": "lightgbm",
+        "replay_strict": False,
+    })
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/events/", json=payload)
         assert resp.status_code == 202
@@ -99,33 +134,23 @@ async def test_post_event_dataset_replay_metadata_and_metrics():
 
 @pytest.mark.asyncio
 async def test_post_event_dataset_replay_numeric_gt_label_normalized():
-    """Numeric ground_truth_label (e.g. '1') must be normalized to the canonical
-    label name (e.g. 'bearing_fault') before comparing against predicted_label so
-    that correct predictions are not falsely marked as incorrect."""
-    payload = {
-        "asset_id": "replay-machine-02",
-        "zone_id": "zone-R",
-        "vibration": 16.0,
-        "temperature": 85.0,
-        "humidity": 35.0,
-        "pressure": 1015.0,
-        "metadata": {
-            "source": "dataset_replay",
-            # Only provide the numeric code — ground_truth_name intentionally absent.
-            "ground_truth_label": "1",
-            "active_model": "random_forest",
-        },
-    }
+    """Numeric ground_truth_label (e.g. '1') must be normalised to the canonical
+    class name (e.g. 'bearing_wear') before comparing against predicted_label so
+    correct predictions are not falsely marked incorrect."""
+    payload = _bearing_wear_event(metadata={
+        "source": "dataset_replay",
+        # Only the numeric code is provided — name intentionally omitted.
+        "ground_truth_label": "1",
+        "active_model": "lightgbm",
+    })
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/events/", json=payload)
         assert resp.status_code == 202
         meta = resp.json()["event"]["metadata"]
         assert "prediction_correct" in meta
-        # predicted_label should always be a canonical name, never a raw numeric code.
-        assert meta["predicted_label"] in {"no_fault", "bearing_fault", "overheating", "combined", "unknown"}
-        # prediction_correct must reflect the normalized comparison, not a raw-vs-canonical mismatch.
+        # predicted_label is always a canonical fault_label string.
+        assert meta["predicted_label"] in _CANONICAL_LABELS
         predicted = meta["predicted_label"]
-        # ground_truth_label "1" normalizes to "bearing_fault" via _normalize_gt_label.
         expected_correct = predicted == _normalize_gt_label("1")
         assert meta["prediction_correct"] == expected_correct
 
@@ -140,19 +165,10 @@ async def test_get_alerts():
 
 @pytest.mark.asyncio
 async def test_clear_alerts_resets_logs_and_metrics():
-    payload = {
-        "asset_id": "replay-machine-01",
-        "zone_id": "zone-R",
-        "vibration": 16.0,
-        "temperature": 85.0,
-        "humidity": 35.0,
-        "pressure": 1015.0,
-        "metadata": {
-            "source": "dataset_replay",
-            "ground_truth_name": "bearing_fault",
-        },
-    }
-
+    payload = _bearing_wear_event(metadata={
+        "source": "dataset_replay",
+        "ground_truth_name": "bearing_wear",
+    })
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         post_resp = await client.post("/events/", json=payload)
         assert post_resp.status_code == 202
@@ -174,3 +190,76 @@ async def test_clear_alerts_resets_logs_and_metrics():
         metrics = metrics_resp.json()
         assert metrics.get("total_replayed") == 0
         assert metrics.get("total_correct") == 0
+
+
+@pytest.mark.asyncio
+async def test_asset_timeline_returns_sensor_history_in_time_order():
+    payloads = [
+        _nominal_event(
+            asset_id="timeline-asset-01",
+            zone_id="zone-T",
+            temperature_c=25.0,
+            timestamp="2026-04-09T10:00:00Z",
+        ),
+        _nominal_event(
+            asset_id="timeline-asset-01",
+            zone_id="zone-T",
+            temperature_c=30.0,
+            vibration_magnitude=9.85,
+            timestamp="2026-04-09T10:01:00Z",
+        ),
+    ]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        for payload in payloads:
+            resp = await client.post("/events/", json=payload)
+            assert resp.status_code == 202
+
+        timeline_resp = await client.get("/assets/timeline-asset-01/timeline?limit=10")
+
+    assert timeline_resp.status_code == 200
+    body = timeline_resp.json()
+    assert body["asset_id"] == "timeline-asset-01"
+    assert len(body["points"]) == 2
+    assert body["points"][0]["timestamp"] < body["points"][1]["timestamp"]
+    assert body["points"][0]["temperature_c"] == 25.0
+    assert body["points"][1]["temperature_c"] == 30.0
+
+
+@pytest.mark.asyncio
+async def test_alert_actions_persist_and_derive_operator_state():
+    payload = _bearing_wear_event(asset_id="operator-asset-01", zone_id="zone-O")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        event_resp = await client.post("/events/", json=payload)
+        assert event_resp.status_code == 202
+        event_id = event_resp.json()["event"]["event_id"]
+
+        assign_resp = await client.post(
+            f"/alerts/{event_id}/actions",
+            json={"action_type": "assign", "assignee": "Hakki", "note": "Forward to maintenance"},
+        )
+        assert assign_resp.status_code == 201
+        assign_body = assign_resp.json()
+        assert assign_body["state"]["operator_status"] == "assigned"
+        assert assign_body["state"]["assigned_to"] == "Hakki"
+
+        resolve_resp = await client.post(
+            f"/alerts/{event_id}/actions",
+            json={"action_type": "resolve", "note": "Issue cleared after inspection"},
+        )
+        assert resolve_resp.status_code == 201
+        assert resolve_resp.json()["state"]["operator_status"] == "resolved"
+        assert resolve_resp.json()["state"]["assigned_to"] == "Hakki"
+
+        actions_resp = await client.get(f"/alerts/{event_id}/actions")
+        assert actions_resp.status_code == 200
+        actions_body = actions_resp.json()
+        assert actions_body["state"]["operator_status"] == "resolved"
+        assert len(actions_body["actions"]) == 2
+        assert actions_body["actions"][0]["action_type"] == "resolve"
+
+        alerts_resp = await client.get("/alerts/")
+        assert alerts_resp.status_code == 200
+        alert_row = alerts_resp.json()["alerts"][0]
+        assert alert_row["operator_status"] == "resolved"
+        assert alert_row["assigned_to"] == "Hakki"

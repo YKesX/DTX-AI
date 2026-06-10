@@ -1,34 +1,49 @@
 {
   "model_name": "best_lstmae.pth",
   "model_family": "lstm_autoencoder_pytorch",
-  "trained_on_dataset": "ziya07/industrial-iot-fault-detection-dataset",
-  "feature_count": 9,
+  "trained_at": "2026-06-10T12:09:52+00:00",
+  "trained_on_dataset": "dtx_ai_master_dataset.csv",
+  "feature_count": 19,
+  "num_classes": 6,
   "feature_order_ref": "services/ai/models/shared/feature_order.json",
+  "class_mapping": {
+    "0": "nominal",
+    "1": "bearing_wear",
+    "2": "overheat",
+    "3": "overload",
+    "4": "pressure_fault",
+    "5": "wheel_slip"
+  },
+  "training_split": "episode-temporal 60/20/20 (train/val/demo-holdout), purge gap 60 rows",
+  "best_params": {
+    "hidden": 32,
+    "latent": 16,
+    "lr": 0.001,
+    "epochs": 17,
+    "max_epochs": 20,
+    "batch": 64,
+    "lambda_recon": 1.0,
+    "lambda_cls": 1.0,
+    "dropout": 0.2,
+    "weight_decay": 0.0001
+  },
+  "leakage_controls": "per-episode temporal split with purge gap; demo holdout is the future tail of every fault run and is never used in training",
   "scaler_required": true,
+  "scaler_path": "services/ai/models/lstm_ae/scaler.pkl",
   "input_shape": {
     "batch": "N",
     "sequence_length": 1,
-    "feature_dim": 9
-  },
-  "class_mapping": {
-    "0": "normal",
-    "1": "anomaly"
-  },
-  "training_split": "70/10/20",
-  "best_params": {
-    "epochs": 50,
-    "hidden": 64,
-    "latent": 8,
-    "lr": 0.01
+    "feature_dim": 19
   },
   "metrics": {
-    "accuracy": 0.65,
-    "f1": 0.607227,
-    "precision": 0.625992,
-    "auroc": null
+    "val_accuracy": 0.996478,
+    "val_f1": 0.996682,
+    "val_precision": 0.996706,
+    "test_accuracy": 0.996632,
+    "test_f1": 0.996684,
+    "test_precision": 0.996587,
+    "test_reconstruction_mse": 0.045763
   },
-  "decision_type": "reconstruction_error_threshold",
-  "threshold_method": "95th_percentile_of_normal_train_reconstruction_error",
-  "default_threshold": null,
-  "notes": "Best reported F1 among current saved artifacts, but runtime use is incomplete until the actual numeric threshold and model class loading code are confirmed."
+  "decision_type": "multiclass_classifier_with_reconstruction",
+  "default_threshold": 0.5
 }

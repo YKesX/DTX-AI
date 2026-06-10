@@ -21,36 +21,43 @@ router = APIRouter()
 
 
 def _anomaly_type_to_label(anomaly_type: str) -> str:
+    """Map AnomalyType.value → canonical fault_label string used everywhere
+    downstream (live_metrics keys, dashboard tags, replay comparisons)."""
     mapping = {
-        "unknown": "no_fault",
-        "vibration": "bearing_fault",
-        "temperature": "overheating",
-        "combined": "combined",
-        "humidity": "combined",
-        "pressure": "combined",
+        "unknown": "nominal",
+        # 6-class canonical identities (match preprocessing.CLASS_NAMES)
+        "nominal": "nominal",
+        "bearing_wear": "bearing_wear",
+        "overheat": "overheat",
+        "overload": "overload",
+        "pressure_fault": "pressure_fault",
+        "wheel_slip": "wheel_slip",
     }
     return mapping.get(anomaly_type, "unknown")
 
 
-# Maps numeric class codes and common aliases to canonical label names used in
-# predicted_label so that ground_truth_label comparisons are always apples-to-apples.
-# Identity entries for canonical names are included so that any raw ground_truth_name
-# value that is already canonical also passes through the same normalisation path.
+# Maps numeric class codes (as emitted by dataset CSVs) and any human aliases
+# to the canonical fault_label name so ground-truth ↔ prediction comparisons
+# in the replay flow line up cleanly. Identity entries ensure already-canonical
+# values pass through unchanged after lowercasing/stripping.
 _GT_LABEL_MAP: dict[str, str] = {
-    # Numeric class codes (as emitted by dataset CSVs)
-    "0": "no_fault",
-    "1": "bearing_fault",
-    "2": "overheating",
-    "3": "combined",
-    # Canonical names — identity mappings ensure lowercased input is also handled
-    "no_fault": "no_fault",
-    "bearing_fault": "bearing_fault",
-    "overheating": "overheating",
-    "combined": "combined",
-    # Human-readable aliases
-    "normal": "no_fault",
-    "vibration": "bearing_fault",
-    "temperature": "overheating",
+    # Numeric class codes — order matches preprocessing.CLASS_NAMES.
+    "0": "nominal",
+    "1": "bearing_wear",
+    "2": "overheat",
+    "3": "overload",
+    "4": "pressure_fault",
+    "5": "wheel_slip",
+    # Canonical names — identity.
+    "nominal": "nominal",
+    "bearing_wear": "bearing_wear",
+    "overheat": "overheat",
+    "overload": "overload",
+    "pressure_fault": "pressure_fault",
+    "wheel_slip": "wheel_slip",
+    # Common human aliases.
+    "normal": "nominal",
+    "no_fault": "nominal",
 }
 
 
@@ -116,6 +123,7 @@ async def ingest_event(event: EventIn):
     metadata["predicted_anomaly_type"] = anomaly.anomaly_type.value
     metadata["predicted_is_anomaly"] = bool(anomaly.is_anomaly)
     metadata["predicted_score"] = float(anomaly.anomaly_score)
+    metadata["recommendation"] = explanation.recommendation
 
     if source == "dataset_replay":
         gt_raw = str(

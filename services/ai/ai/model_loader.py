@@ -93,33 +93,100 @@ def _build_unavailable(model_key: str, family: str, reason: str, feature_order: 
 def _load_lstm_runtime_model(model_path: Path, metadata: dict[str, Any]) -> Any:
     try:
         import torch
-        import torch.nn as nn
     except Exception as exc:  # pragma: no cover - dependency optional
         raise RuntimeError(f"PyTorch unavailable: {exc}") from exc
 
+    from ai.lstm_classifier import LSTMAutoencoderClassifier
+
     feature_dim = int(metadata.get("feature_count", DEFAULT_FEATURE_COUNT))
+    num_classes = int(metadata.get("num_classes", len(metadata.get("class_mapping", {})) or 2))
     params = metadata.get("best_params", {})
     hidden = int(params.get("hidden", 64))
     latent = int(params.get("latent", 8))
 
-    class LSTMAutoencoder(nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.encoder = nn.LSTM(feature_dim, hidden, batch_first=True)
-            self.encoder_latent = nn.Linear(hidden, latent)
-            self.decoder_input = nn.Linear(latent, hidden)
-            self.decoder = nn.LSTM(hidden, feature_dim, batch_first=True)
-
-        def forward(self, x):
-            encoded, _ = self.encoder(x)
-            latent_vec = self.encoder_latent(encoded)
-            decoded_in = self.decoder_input(latent_vec)
-            reconstructed, _ = self.decoder(decoded_in)
-            return reconstructed
-
-    model = LSTMAutoencoder()
+    model = LSTMAutoencoderClassifier(
+        input_dim=feature_dim,
+        hidden_dim=hidden,
+        latent_dim=latent,
+        num_classes=num_classes,
+    )
     state_dict = torch.load(model_path, map_location="cpu")
-    model.load_state_dict(state_dict, strict=False)
+    # strict=True so a stale checkpoint (e.g. trained against a different
+    # architecture or num_classes) fails loudly instead of silently loading
+    # half the weights and leaving the classifier head random.
+    model.load_state_dict(state_dict, strict=True)
+    model.eval()
+    return model
+
+
+def _load_tabnet_runtime_model(model_path: Path) -> Any:
+    try:
+        from pytorch_tabnet.tab_model import TabNetClassifier
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError(f"pytorch-tabnet unavailable: {exc}") from exc
+    
+    model = TabNetClassifier()
+    # TabNet's load_model expects a string path, optionally without the .zip extension,
+    # but providing the exact path works.
+    model.load_model(str(model_path))
+    return model
+
+
+def _load_cnn_runtime_model(model_path: Path, metadata: dict[str, Any]) -> Any:
+    try:
+        import torch
+    except Exception as exc:  # pragma: no cover - dependency optional
+        raise RuntimeError(f"PyTorch unavailable: {exc}") from exc
+
+    from ai.cnn_classifier import CNNClassifier
+
+    feature_dim = int(metadata.get("feature_count", DEFAULT_FEATURE_COUNT))
+    num_classes = int(metadata.get("num_classes", len(metadata.get("class_mapping", {})) or 2))
+    params = metadata.get("best_params", {})
+    window_size = int(params.get("window", 1))
+    conv_channels = int(params.get("conv_channels", 32))
+    hidden_dim = int(params.get("hidden_dim", 64))
+    kernel_size = int(params.get("kernel_size", 3))
+    dropout = float(params.get("dropout", 0.1))
+
+    model = CNNClassifier(
+        input_dim=feature_dim,
+        num_classes=num_classes,
+        window_size=window_size,
+        conv_channels=conv_channels,
+        kernel_size=kernel_size,
+        hidden_dim=hidden_dim,
+        dropout=dropout,
+    )
+    state_dict = torch.load(model_path, map_location="cpu")
+    model.load_state_dict(state_dict, strict=True)
+    model.eval()
+    model.eval()
+    return model
+
+
+def _load_bilstm_runtime_model(model_path: Path, metadata: dict[str, Any]) -> Any:
+    try:
+        import torch
+    except Exception as exc:
+        raise RuntimeError(f"PyTorch unavailable: {exc}") from exc
+
+    from ai.bilstm_classifier import BiLSTMClassifier
+
+    feature_dim = int(metadata.get("feature_count", DEFAULT_FEATURE_COUNT))
+    num_classes = int(metadata.get("num_classes", len(metadata.get("class_mapping", {})) or 2))
+    params = metadata.get("best_params", {})
+    
+    model = BiLSTMClassifier(
+        input_dim=feature_dim,
+        num_classes=num_classes,
+        window_size=int(params.get("window", 30)),
+        hidden_dim=int(params.get("hidden_dim", 64)),
+        num_layers=int(params.get("num_layers", 2)),
+        dropout=float(params.get("dropout", 0.3)),
+    )
+    state_dict = torch.load(model_path, map_location="cpu")
+    model.load_state_dict(state_dict, strict=True)
     model.eval()
     return model
 
@@ -180,15 +247,30 @@ def load_runtime_model(
 
             if family == "lstm_autoencoder_pytorch":
                 model = _load_lstm_runtime_model(model_path, metadata)
+            elif family == "tabnet_pytorch":
+                model = _load_tabnet_runtime_model(model_path)
+            elif family == "cnn_pytorch":
+                model = _load_cnn_runtime_model(model_path, metadata)
+            elif family == "bilstm_pytorch":
+                model = _load_bilstm_runtime_model(model_path, metadata)
             else:
                 model = joblib.load(model_path)
 
+            scaler_required = bool(metadata.get("scaler_required", True))
+            # Prefer the scaler trained alongside this family (saved next to
+            # the model artifact by scripts/train_models.py); the shared
+            # scaler is only a fallback so one family's scaler is never
+            # silently applied to another family's inputs.
+            family_scaler = None
+            family_scaler_path = model_path.parent / "scaler.pkl"
+            if scaler_required and family_scaler_path.exists():
+                family_scaler = joblib.load(family_scaler_path)
             runtime = RuntimeModel(
                 key=model_key,
                 family=family,
                 model=model,
                 metadata=metadata,
-                scaler=scaler,
+                scaler=(family_scaler or scaler) if scaler_required else None,
                 feature_order=feature_order,
                 supports_tree_xai=bool(cfg.get("supports_tree_xai", False)),
                 available=True,

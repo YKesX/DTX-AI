@@ -1,0 +1,56 @@
+{
+  "generated_at": "2026-06-10T12:09:52+00:00",
+  "split": "episode-temporal 60/20/20 (train/val/demo-holdout), purge gap 60 rows",
+  "winner": "CNN",
+  "results": [
+    {
+      "model": "RandomForest",
+      "val_f1": 0.9930034979265397,
+      "val_accuracy": 0.9927212960788918,
+      "holdout_f1": 0.9976820316607133,
+      "holdout_accuracy": 0.9975303098338572
+    },
+    {
+      "model": "LightGBM",
+      "val_f1": 0.9979867724110929,
+      "val_accuracy": 0.9978868278938718,
+      "holdout_f1": 0.9982223651487567,
+      "holdout_accuracy": 0.9982038616973506
+    },
+    {
+      "model": "XGBoost",
+      "val_f1": 0.9975573029299286,
+      "val_accuracy": 0.9974172340925099,
+      "holdout_f1": 0.9984698720073245,
+      "holdout_accuracy": 0.9984283789851819
+    },
+    {
+      "model": "TabNet",
+      "val_f1": 0.9968616976130403,
+      "val_accuracy": 0.9967128433904673,
+      "holdout_f1": 0.9952810859284317,
+      "holdout_accuracy": 0.9950606196677144
+    },
+    {
+      "model": "CNN",
+      "val_f1": 1.0,
+      "val_accuracy": 1.0,
+      "holdout_f1": 0.9919508754460211,
+      "holdout_accuracy": 0.9915356711003628
+    },
+    {
+      "model": "Bi-LSTM",
+      "val_f1": 1.0,
+      "val_accuracy": 1.0,
+      "holdout_f1": 1.0,
+      "holdout_accuracy": 1.0
+    },
+    {
+      "model": "LSTM-AE",
+      "val_f1": 0.9966822513210811,
+      "val_accuracy": 0.9964780464897863,
+      "holdout_f1": 0.9966837457351421,
+      "holdout_accuracy": 0.9966322406825325
+    }
+  ]
+}

@@ -12,8 +12,12 @@ def test_run_demo_help_contains_required_flags():
         check=True,
     )
     out = completed.stdout
-    assert "--scenario" in out
-    assert "--mode" in out
+    # Legacy --scenario / --mode flags were removed when the synthetic-scenario
+    # seeder was retired in favour of dataset-replay + Isaac Sim only.
+    assert "--split" in out
+    assert "episode_holdout" in out
+    assert "temporal" in out
     assert "--model" in out
     assert "--strict-replay" in out
     assert "--no-seed" in out
+    assert "--count" in out

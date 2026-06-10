@@ -2,6 +2,11 @@
 
 Base URL: `http://localhost:8000`
 
+The canonical Pydantic schemas live in
+[`packages/shared/schemas.py`](../packages/shared/schemas.py); the dataset
+columns and fault classes they reflect live in
+[`services/ai/preprocessing.py`](../services/ai/preprocessing.py).
+
 ---
 
 ## Endpoints
@@ -12,240 +17,128 @@ Returns API liveness status.
 
 **Response 200**
 ```json
-{ "status": "ok", "timestamp": "2025-01-01T12:00:00Z" }
+{ "status": "ok", "timestamp": "2026-05-14T12:00:00Z" }
 ```
 
 ---
 
 ### `POST /events/`
 
-Ingest a warehouse sensor event and trigger the AI pipeline.
+Ingest a warehouse-asset telemetry frame and run the AI pipeline.
 
 **Request body** (`EventIn`)
+
+Every sensor channel is optional — partial frames are accepted; missing
+channels are treated as zero by the runtime.
+
 ```json
 {
-  "asset_id": "conveyor-belt-01",
+  "asset_id": "forklift-01",
   "zone_id": "zone-A",
-  "vibration": 14.7,
-  "temperature": 82.3,
-  "humidity": 41.0,
-  "pressure": 1012.0,
-  "metadata": {}
+  "timestamp": "2026-05-14T12:00:00Z",
+
+  "imu_lin_acc_x": -9.77, "imu_lin_acc_y": 0.00, "imu_lin_acc_z": 0.86,
+  "imu_ang_vel_x":  0.00, "imu_ang_vel_y": 0.00, "imu_ang_vel_z": 0.00,
+
+  "vibration_magnitude": 9.81,
+
+  "lift_joint_position": -0.15,
+  "lift_force_z": 0.31,
+  "lift_joint_velocity": 0.00,
+
+  "pseudo_pressure_pa": 3.82,
+
+  "drive_joint_velocity": -0.01,
+  "drive_joint_effort":   3082.0,
+
+  "roller_fl_velocity": 0.06, "roller_fr_velocity": -0.02,
+  "roller_bl_velocity": 0.07, "roller_br_velocity":  0.01,
+
+  "power_dissipated_w": 0.0,
+  "temperature_c": 25.15,
+
+  "metadata": {
+    "source": "isaac_sim",
+    "active_model": "lightgbm"
+  }
 }
 ```
 
-**Response 202** (`DashboardAlert` — nested)
+**Response 202** (`DashboardAlert`)
+
 ```json
 {
   "alert_id": "uuid",
   "event": {
     "event_id": "uuid",
-    "asset_id": "conveyor-belt-01",
+    "asset_id": "forklift-01",
     "zone_id": "zone-A",
-    "timestamp": "2026-01-01T12:00:00Z",
-    "vibration": 14.7,
-    "temperature": 82.3,
-    "humidity": 41.0,
-    "pressure": 1012.0,
+    "timestamp": "2026-05-14T12:00:00Z",
+    "temperature_c": 25.15,
+    "...": "all 19 sensor channels echoed back",
     "metadata": {
-      "source": "dataset_replay",
-      "dataset": "ziya",
-      "split": "test",
-      "row_id": 123,
-      "ground_truth_name": "bearing_fault",
-      "active_model": "random_forest",
-      "runtime_model": "random_forest",
-      "predicted_label": "bearing_fault",
-      "prediction_correct": true
+      "predicted_label": "nominal",
+      "predicted_anomaly_type": "nominal",
+      "predicted_is_anomaly": false,
+      "predicted_score": 0.997,
+      "recommendation": "No action required — asset operating within nominal envelope.",
+      "runtime_model": "lightgbm",
+      "runtime_model_family": "lightgbm",
+      "runtime_model_available": true
     }
   },
   "anomaly": {
     "event_id": "uuid",
-    "anomaly_score": 0.625,
-    "is_anomaly": true,
-    "anomaly_type": "vibration",
-    "severity": "warning",
-    "detected_at": "2026-01-01T12:00:00Z"
+    "anomaly_score": 0.997,
+    "is_anomaly": false,
+    "anomaly_type": "nominal",
+    "severity": "info"
   },
   "explanation": {
     "event_id": "uuid",
-    "summary": "Anomaly detected on asset 'conveyor-belt-01' ...",
-    "contributing_features": { "vibration": 0.8, "temperature": 0.2 },
-    "recommendation": "Schedule immediate maintenance inspection.",
-    "generated_at": "2026-01-01T12:00:00Z"
-  },
-  "created_at": "2026-01-01T12:00:00Z"
+    "summary": "Status: System is operating normally. No anomalies detected.",
+    "contributing_features": { "temperature_c": 0.4, "power_dissipated_w": 0.3 },
+    "recommendation": "No action required — asset operating within nominal envelope."
+  }
 }
 ```
 
-**Severity values**: `info` | `warning` | `critical`
+The same `DashboardAlert` payload is also pushed over `WS /ws/events` to every
+connected dashboard client.
+
+### Sensor field reference
+
+| Field                   | Unit         | Notes |
+|-------------------------|--------------|-------|
+| `imu_lin_acc_{x,y,z}`   | m/s²         | IMU linear acceleration |
+| `imu_ang_vel_{x,y,z}`   | rad/s        | IMU angular velocity |
+| `vibration_magnitude`   | m/s²         | Scalar L2 norm of vibration |
+| `lift_joint_position`   | m or rad     | Lift joint generalized coordinate |
+| `lift_force_z`          | N            | Vertical lift force |
+| `lift_joint_velocity`   | m/s or rad/s | Lift joint generalized velocity |
+| `pseudo_pressure_pa`    | Pa           | Hydraulic-line proxy pressure (negative under suction) |
+| `drive_joint_velocity`  | rad/s        | Drive-joint angular velocity |
+| `drive_joint_effort`    | N·m          | Drive-joint torque |
+| `roller_{fl,fr,bl,br}_velocity` | rad/s | Four wheel-roller angular velocities |
+| `power_dissipated_w`    | W            | Electrical power dissipation |
+| `temperature_c`         | °C           | Motor / drive surface temperature |
+
+### Fault classes returned in `anomaly.anomaly_type`
+
+| Code | Label             | Default severity | Operator action |
+|------|-------------------|------------------|-----------------|
+| 0    | `nominal`         | info             | none |
+| 1    | `bearing_wear`    | warning          | inspect bearings |
+| 2    | `overheat`        | critical         | reduce load, verify cooling |
+| 3    | `overload`        | warning          | check payload vs rating |
+| 4    | `pressure_fault`  | warning          | inspect hydraulic/pneumatic line |
+| 5    | `wheel_slip`      | warning          | check traction / surface |
 
 ---
 
-### `GET /metrics/live`
+### `GET /events`, `GET /alerts`, `WS /ws/events`, `GET /metrics/live`, `GET /assets/{id}/timeline`, `POST /alerts/{id}/actions`, `DELETE /alerts/clear`
 
-Returns in-memory replay validation metrics (dataset replay mode).
-
-**Response 200**
-```json
-{
-  "total_replayed": 100,
-  "total_correct": 64,
-  "running_accuracy": 0.64,
-  "per_class_ground_truth": {"no_fault": 30, "bearing_fault": 40, "overheating": 30},
-  "per_class_predicted": {"no_fault": 28, "bearing_fault": 45, "overheating": 27},
-  "confusion_counts": {"bearing_fault->bearing_fault": 25},
-  "per_model": {"random_forest": 100},
-  "last_updated": "2026-03-25T12:00:00Z"
-}
-```
-
----
-
-### `GET /alerts/?limit=50`
-
-Returns the most recent processed events from the database, newest first.
-This is an `EventLog` flat shape — it does not include `contributing_features`
-since those are not persisted to the database in the current MVP.
-
-**Response 200**
-```json
-{
-  "alerts": [
-    {
-      "event_id": "uuid",
-      "asset_id": "conveyor-belt-01",
-      "zone_id": "zone-A",
-      "timestamp": "2026-01-01T12:00:00Z",
-      "anomaly_score": 0.625,
-      "is_anomaly": 1,
-      "anomaly_type": "vibration",
-      "severity": "warning",
-      "summary": "Anomaly detected on asset 'conveyor-belt-01'...",
-      "raw_payload": "{...}"
-    }
-  ],
-  "count": 1
-}
-```
-
-> **Note:** `is_anomaly` is stored as an integer (`0`/`1`) in SQLite.
-> The dashboard `normalizeAlert` helper coerces this to a boolean.
-> `raw_payload` is a JSON string of the original `EventIn`.
-
----
-
-### `WebSocket /ws/events`
-
-Real-time push channel. Connect to receive `DashboardAlert` JSON objects
-as they are produced by `POST /events/`.
-
-**Message format**: same nested `DashboardAlert` schema as `POST /events/` response above.
-
----
-
-## Dashboard payload normalisation
-
-The frontend (`src/lib/normalizeAlert.js`) converts every backend payload
-into a flat **view-model** before passing it to React components.
-
-`id` is always set to `event_id` — the stable identifier shared by both
-the WebSocket `DashboardAlert` and the REST `EventLog` row — so that
-deduplication and row selection work correctly across sources.
-`alert_id` is kept as a separate optional field.
-
-| View-model field | Source (DashboardAlert) | Source (EventLog row) |
-|---|---|---|
-| `id` *(stable, always `event_id`)* | `event.event_id` | `event_id` |
-| `alert_id` | `alert_id` | `null` |
-| `event_id` | `event.event_id` | `event_id` |
-| `timestamp` | `event.timestamp` | `timestamp` |
-| `entity_id` | `event.asset_id` | `asset_id` |
-| `zone_id` | `event.zone_id` | `zone_id` |
-| `anomaly_type` | `anomaly.anomaly_type` | `anomaly_type` |
-| `anomaly_score` | `anomaly.anomaly_score` | `anomaly_score` |
-| `severity` | `anomaly.severity` | `severity` |
-| `is_anomaly` | `anomaly.is_anomaly` | `is_anomaly` (bool coerced) |
-| `top_features` | derived from `explanation.contributing_features` dict | `[]` (not stored) |
-| `explanation` | `summary + " " + recommendation` | `summary` |
-| `source` | `event.metadata.source` | parsed from `raw_payload.metadata.source` |
-| `active_model` | `event.metadata.runtime_model \/ active_model` | parsed from `raw_payload.metadata` |
-| `ground_truth_name` | `event.metadata.ground_truth_name` | parsed from `raw_payload.metadata` |
-| `predicted_label` | `event.metadata.predicted_label` | parsed from `raw_payload.metadata` |
-| `prediction_correct` | `event.metadata.prediction_correct` | parsed from `raw_payload.metadata` |
-
----
-
-## Severity mapping
-
-| Backend value | Badge label (TR) | Badge colour |
-|---|---|---|
-| `info` | Bilgi | blue |
-| `warning` | Uyarı | yellow |
-| `critical` | Kritik | red |
-
-Legacy mock values (`low`, `medium`, `high`) also work for backward compatibility.
-
----
-
-## Schemas
-
-See `packages/shared/schemas.py` for the full Pydantic definitions.
-
-| Schema | Purpose |
-|--------|---------|
-| `EventIn` | Inbound sensor event (asset_id, zone_id, vibration, temperature, humidity, pressure) |
-| `AnomalyResult` | AI anomaly detection output |
-| `ExplanationResult` | XAI explanation (summary + contributing_features dict) |
-| `TwinUpdate` | Digital-twin status change (Isaac Sim adapter) |
-| `DashboardAlert` | Composed nested alert sent to dashboard |
-| `EventLog` | Flat persisted SQLite row |
-
----
-
-## Demo seeders
-
-```bash
-# Quick mixed demo (10 events, 0.8 s apart)
-python scripts/seed_demo_events.py
-
-# Specific fault scenario
-python scripts/seed_demo_events.py --scenario overheating --count 5
-
-# All options
-python scripts/seed_demo_events.py --help
-```
-
-Dataset replay validation:
-
-```bash
-python scripts/replay_dataset_demo.py --model random_forest --split test --limit 100 --delay 0.5 --source ziya --strict
-```
-
-Available scenarios: `normal`, `bearing_fault`, `overheating`, `combined`, `mixed`, `gradual_drift`, `intermittent_spike`
-
----
-
-## Plugging in real trained model artifacts
-
-When training is complete:
-
-1. Place `model_best.pkl` and `scaler.pkl` in `services/ai/` (or configure via env var).
-2. Update `services/ai/ai/detector.py` — replace the rule-based stub with
-   `joblib.load("model_best.pkl").predict(...)` using features preprocessed by
-   `services/ai/preprocessing.py::preprocess_single(...)`.
-3. Update `services/ai/ai/explainer.py` — replace stub attributions with
-   `services/ai/xai_explainer.py::generate_xai_report(model, live_json)`.
-4. The `contributing_features` dict in `ExplanationResult` maps directly to
-   the SHAP values returned by `xai_explainer.py`.
-5. No changes to `api/routes/events.py`, `DashboardAlert`, or the dashboard
-   normalisation layer are needed.
-
----
-
-## Future Isaac Sim integration
-
-Synthetic events from Isaac Sim can enter the system through the same
-`POST /events/` endpoint. The `apps/sim/sim/adapter.py` already has a
-`notify(TwinUpdate)` hook that is called (fire-and-forget) by the API on
-every anomaly. No changes to the dashboard or normalisation layer are needed.
+Behaviour is unchanged from the previous contract; only the sensor field
+names and fault-class vocabulary have changed. See the route handlers under
+[`apps/api/api/routes/`](../apps/api/api/routes/) for the precise response
+shapes.

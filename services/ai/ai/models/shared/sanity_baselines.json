@@ -1,0 +1,125 @@
+{
+  "split": "episode-temporal 60/20/20 (train/val/demo-holdout), purge gap 60 rows",
+  "top_anova_features": [
+    {
+      "feature": "temperature_c",
+      "anova_f": 34747.20901139065
+    },
+    {
+      "feature": "drive_joint_effort",
+      "anova_f": 11680.116746927935
+    },
+    {
+      "feature": "lift_force_z",
+      "anova_f": 10850.222540719751
+    },
+    {
+      "feature": "pseudo_pressure_pa",
+      "anova_f": 10848.393661073404
+    },
+    {
+      "feature": "drive_joint_velocity",
+      "anova_f": 98.51190942317228
+    },
+    {
+      "feature": "roller_fr_velocity",
+      "anova_f": 92.66165886871539
+    },
+    {
+      "feature": "roller_fl_velocity",
+      "anova_f": 92.46932601121894
+    },
+    {
+      "feature": "roller_bl_velocity",
+      "anova_f": 80.76343985081374
+    },
+    {
+      "feature": "roller_br_velocity",
+      "anova_f": 79.59339638922324
+    },
+    {
+      "feature": "lift_joint_position",
+      "anova_f": 53.096910751931745
+    }
+  ],
+  "baselines": [
+    {
+      "baseline": "temperature_only",
+      "features": [
+        "temperature_c"
+      ],
+      "feature_count": 1,
+      "accuracy": 0.47171082173327344,
+      "macro_f1": 0.492056203926273,
+      "precision": 0.4899076018031474
+    },
+    {
+      "baseline": "no_temperature",
+      "features": [
+        "imu_lin_acc_x",
+        "imu_lin_acc_y",
+        "imu_lin_acc_z",
+        "imu_ang_vel_x",
+        "imu_ang_vel_y",
+        "imu_ang_vel_z",
+        "vibration_magnitude",
+        "lift_joint_position",
+        "lift_force_z",
+        "pseudo_pressure_pa",
+        "drive_joint_velocity",
+        "drive_joint_effort",
+        "lift_joint_velocity",
+        "roller_fl_velocity",
+        "roller_fr_velocity",
+        "roller_bl_velocity",
+        "roller_br_velocity",
+        "power_dissipated_w"
+      ],
+      "feature_count": 18,
+      "accuracy": 0.7936686124831612,
+      "macro_f1": 0.7633851974720317,
+      "precision": 0.7635087019818325
+    },
+    {
+      "baseline": "top3_anova",
+      "features": [
+        "temperature_c",
+        "drive_joint_effort",
+        "lift_force_z"
+      ],
+      "feature_count": 3,
+      "accuracy": 0.9941625505163898,
+      "macro_f1": 0.9945338175369818,
+      "precision": 0.9943728524082246
+    },
+    {
+      "baseline": "full",
+      "features": [
+        "imu_lin_acc_x",
+        "imu_lin_acc_y",
+        "imu_lin_acc_z",
+        "imu_ang_vel_x",
+        "imu_ang_vel_y",
+        "imu_ang_vel_z",
+        "vibration_magnitude",
+        "lift_joint_position",
+        "lift_force_z",
+        "pseudo_pressure_pa",
+        "drive_joint_velocity",
+        "drive_joint_effort",
+        "lift_joint_velocity",
+        "roller_fl_velocity",
+        "roller_fr_velocity",
+        "roller_bl_velocity",
+        "roller_br_velocity",
+        "power_dissipated_w",
+        "temperature_c"
+      ],
+      "feature_count": 19,
+      "accuracy": 0.9979793444095195,
+      "macro_f1": 0.9981011611090095,
+      "precision": 0.9980225179581259
+    }
+  ],
+  "notes": "If temperature_only is close to full, the dataset is shortcut-dominated. If no_temperature collapses, non-temperature channels are not carrying the labels."
+}

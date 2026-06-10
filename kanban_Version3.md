@@ -14,7 +14,7 @@ Based on codebase analysis as of 2026-03-25:
 | To Do                              | In Progress                          | Done                                 |
 |------------------------------------|--------------------------------------|--------------------------------------|
 | HW-01 ESP32 health input           | WEB-03 Trend grafiği                 | DT-01 Mini repo sainresi             |
-|                                    | OPS-02 Kanban ölçüleri               | DT-02 Entity playback                |
+|                                    | OPS-02 Kanban ölçüleri               |               |
 |                                    |                                      | AI-01 Core feature extraction        |
 |                                    |                                      | AI-02 Event scoring                  |
 |                                    |                                      | XAI-01 Top feature explanation       |

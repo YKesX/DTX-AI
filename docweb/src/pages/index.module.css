@@ -1,0 +1,237 @@
+.heroBanner {
+  position: relative;
+  padding: 5rem 1.5rem 3rem;
+  overflow: hidden;
+}
+
+.heroBanner::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top right, rgba(0, 0, 0, 0.12), transparent 30%),
+    linear-gradient(180deg, #ffffff 0%, #f1f1ee 100%);
+  pointer-events: none;
+}
+
+.heroInner {
+  position: relative;
+  z-index: 1;
+  max-width: 1200px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
+  gap: 2rem;
+  align-items: end;
+}
+
+.heroCopy {
+  max-width: 760px;
+}
+
+.heroEyebrow,
+.sectionEyebrow,
+.panelLabel {
+  margin: 0 0 1rem;
+  font-size: 0.78rem;
+  font-family: var(--dtx-font-mono);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #5d5d5d;
+}
+
+.heroTitle {
+  margin: 0;
+  font-size: clamp(3.6rem, 8vw, 7rem);
+  line-height: 0.92;
+  letter-spacing: -0.06em;
+}
+
+.heroSubtitle {
+  max-width: 34rem;
+  margin: 1.5rem 0 0;
+  font-size: clamp(1.15rem, 2vw, 1.45rem);
+  line-height: 1.5;
+  color: #222;
+}
+
+.heroDescription {
+  max-width: 38rem;
+  margin: 1.25rem 0 0;
+  font-size: 1rem;
+  line-height: 1.75;
+  color: #474747;
+}
+
+.buttons {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 2rem;
+  flex-wrap: wrap;
+}
+
+.heroMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.heroMeta span {
+  border: 1px solid rgba(17, 17, 17, 0.14);
+  border-radius: 999px;
+  padding: 0.5rem 0.85rem;
+  font-size: 0.8rem;
+  font-family: var(--dtx-font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #111;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.heroPanel {
+  position: relative;
+  padding: 1.5rem;
+  border: 1px solid rgba(17, 17, 17, 0.12);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.08);
+}
+
+.pipeline {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.pipeline span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(17, 17, 17, 0.08);
+  font-size: 1rem;
+}
+
+.pipeline span::after {
+  content: '';
+  width: 42px;
+  height: 1px;
+  background: #111;
+}
+
+.pipeline span:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.pipeline span:last-child::after {
+  width: 10px;
+}
+
+.panelText {
+  margin: 0;
+  color: #4d4d4d;
+  line-height: 1.7;
+}
+
+.inlineLink {
+  display: inline-block;
+  margin-top: 1.25rem;
+  font-family: var(--dtx-font-mono);
+  font-size: 0.86rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #111;
+}
+
+.homeMain {
+  padding-bottom: 4rem;
+}
+
+.signalSection {
+  padding: 1rem 0 4rem;
+}
+
+.sectionHeading {
+  display: grid;
+  gap: 0.6rem;
+  margin-bottom: 2rem;
+}
+
+.sectionTitle {
+  margin: 0;
+  max-width: 28rem;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1;
+}
+
+.signalGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.signalCard {
+  min-height: 100%;
+  padding: 1.5rem;
+  border: 1px solid rgba(17, 17, 17, 0.1);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.signalValue {
+  margin: 0 0 0.9rem;
+  font-size: clamp(1.9rem, 5vw, 3rem);
+  line-height: 1;
+  font-family: var(--dtx-font-heading);
+  color: #111;
+}
+
+.signalLabel {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.signalDetail {
+  margin: 0.9rem 0 0;
+  color: #4d4d4d;
+  line-height: 1.7;
+}
+
+@media screen and (max-width: 996px) {
+  .heroBanner {
+    padding: 4rem 1rem 2.5rem;
+  }
+
+  .heroInner,
+  .signalGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .heroTitle {
+    font-size: clamp(3rem, 18vw, 5rem);
+  }
+}
+
+@media screen and (max-width: 640px) {
+  .heroMeta {
+    gap: 0.5rem;
+  }
+
+  .heroMeta span {
+    width: 100%;
+    text-align: center;
+  }
+
+  .buttons {
+    align-items: stretch;
+  }
+
+  .buttons :global(.button) {
+    width: 100%;
+    justify-content: center;
+  }
+}

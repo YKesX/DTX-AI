@@ -35,6 +35,8 @@
  *   explanation   — plain-text explanation string
  *   summary       — summary field alone
  *   recommendation
+ *   vibration / temperature / humidity / pressure
+ *   operator_status / assigned_to / last_action / last_action_at
  *   _raw          — original unserialized object (for debugging)
  * }
  */
@@ -98,11 +100,23 @@ export function normalizeAlert(raw) {
         typeof metadata.prediction_correct === 'boolean'
           ? metadata.prediction_correct
           : null,
+      vibration:
+        typeof event.vibration === 'number' ? event.vibration : null,
+      temperature:
+        typeof event.temperature === 'number' ? event.temperature : null,
+      humidity:
+        typeof event.humidity === 'number' ? event.humidity : null,
+      pressure:
+        typeof event.pressure === 'number' ? event.pressure : null,
       anomaly_type: anomaly.anomaly_type ?? 'unknown',
       anomaly_score:
         typeof anomaly.anomaly_score === 'number' ? anomaly.anomaly_score : 0,
       severity: anomaly.severity ?? 'info',
       is_anomaly: Boolean(anomaly.is_anomaly),
+      operator_status: raw.operator_status ?? 'new',
+      assigned_to: raw.assigned_to ?? '',
+      last_action: raw.last_action ?? null,
+      last_action_at: raw.last_action_at ?? null,
       top_features: featuresFromDict(explanation.contributing_features),
       explanation: [explanation.summary, explanation.recommendation]
         .filter(Boolean)
@@ -117,6 +131,7 @@ export function normalizeAlert(raw) {
   const entityId =
     raw.asset_id ?? raw.entity_id ?? raw.entity ?? '';
   const parsedPayload = parseRawPayload(raw.raw_payload);
+  const payloadMetadata = parsedPayload.metadata ?? {};
   const metadata = parsedPayload.metadata ?? {};
 
   return {
@@ -136,17 +151,32 @@ export function normalizeAlert(raw) {
       typeof metadata.prediction_correct === 'boolean'
         ? metadata.prediction_correct
         : null,
+    vibration:
+      typeof parsedPayload.vibration === 'number' ? parsedPayload.vibration : null,
+    temperature:
+      typeof parsedPayload.temperature === 'number' ? parsedPayload.temperature : null,
+    humidity:
+      typeof parsedPayload.humidity === 'number' ? parsedPayload.humidity : null,
+    pressure:
+      typeof parsedPayload.pressure === 'number' ? parsedPayload.pressure : null,
     anomaly_type: raw.anomaly_type ?? 'unknown',
     anomaly_score:
       typeof raw.anomaly_score === 'number' ? raw.anomaly_score : 0,
     severity: raw.severity ?? 'info',
     is_anomaly: Boolean(raw.is_anomaly),
+    operator_status: raw.operator_status ?? 'new',
+    assigned_to: raw.assigned_to ?? '',
+    last_action: raw.last_action ?? null,
+    last_action_at: raw.last_action_at ?? null,
     // Preserve existing top_features array if present (e.g. mock data),
     // otherwise leave empty (EventLog rows don't store feature detail).
     top_features: Array.isArray(raw.top_features) ? raw.top_features : [],
-    explanation: raw.summary ?? raw.explanation ?? '',
+    explanation:
+      [raw.summary ?? raw.explanation ?? '', payloadMetadata.recommendation ?? raw.recommendation ?? '']
+        .filter(Boolean)
+        .join(' '),
     summary: raw.summary ?? raw.explanation ?? '',
-    recommendation: raw.recommendation ?? '',
+    recommendation: payloadMetadata.recommendation ?? raw.recommendation ?? '',
     _raw: raw,
   };
 }
