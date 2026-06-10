@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Replay held-out dataset rows through ``POST /events/`` for validation demos.
+"""Replay dataset rows through ``POST /events/`` for validation demos.
 
-The dataset is sorted chronologically by ``timestamp_s``; we take the tail 20%
-as the held-out test split and POST one row at a time, stamping each event
-with replay metadata so the API can compute live ground-truth-vs-prediction
-accuracy.
+Default ``--split holdout`` is the shuffled stratified demo holdout. Use
+``--split episode_holdout`` for grouped episode/run validation or
+``--split temporal`` for chronological tail checks.
 """
 
 from __future__ import annotations
@@ -30,8 +29,11 @@ from preprocessing import (  # noqa: E402
     CLASS_NAMES,
     FEATURES,
     LABEL_TO_INT,
+    episode_groups,
     get_demo_holdout,
     load_data,
+    split_episode_pool_and_holdout,
+    split_temporal_pool_and_holdout,
 )
 
 try:
@@ -59,10 +61,12 @@ def prepare_replay_rows(
 ) -> pd.DataFrame:
     """Pick the rows to replay through ``POST /events/``.
 
-    The default split is ``holdout`` — the canonical 20% demo-holdout slice
-    that ``scripts/train_models.py`` excludes from every training run. That
-    means a fresh demo only ever shows the dashboard predictions on data the
-    models have never seen.
+    The default split is ``holdout`` — the canonical 20% shuffled demo slice
+    used for readable dashboard demos.
+
+    ``episode_holdout`` is the honest grouped split for validation: complete
+    episodes/runs are held out together. ``temporal`` is the chronological
+    tail and is useful for drift checks.
 
     ``shuffle`` is on by default so a small ``--limit`` covers all 6 fault
     classes instead of a single contiguous block (the underlying CSV is
@@ -74,10 +78,19 @@ def prepare_replay_rows(
 
     if split == "holdout":
         split_df = get_demo_holdout(raw_df)
+    elif split == "episode_holdout":
+        _, split_df = split_episode_pool_and_holdout(raw_df)
+    elif split == "temporal":
+        _, split_df = split_temporal_pool_and_holdout(raw_df)
     elif split == "all":
         split_df = raw_df.copy().reset_index(drop=True)
     else:
-        raise ValueError(f"Unsupported split '{split}'. Use 'holdout' or 'all'.")
+        raise ValueError(
+            f"Unsupported split '{split}'. Use 'holdout', 'episode_holdout', 'temporal', or 'all'."
+        )
+
+    split_df = split_df.copy().reset_index(drop=True)
+    split_df["_episode_group"] = episode_groups(split_df).astype(str).values
 
     if shuffle:
         seed = None if shuffle_seed == 0 else shuffle_seed
@@ -133,6 +146,8 @@ def build_event_payload(
         "active_model": model,
         "replay_strict": bool(strict),
     }
+    if "_episode_group" in row and pd.notna(row["_episode_group"]):
+        payload["metadata"]["episode_group"] = str(row["_episode_group"])
     return payload
 
 
@@ -176,9 +191,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--url", default="http://localhost:8000")
     parser.add_argument("--model", default="lightgbm")
     parser.add_argument(
-        "--split", default="holdout", choices=["holdout", "all"],
-        help="'holdout' (default) replays only the demo holdout — rows no model has seen; "
-             "'all' replays the entire dataset including rows used in training.",
+        "--split", default="holdout", choices=["holdout", "episode_holdout", "temporal", "all"],
+        help="'holdout' (default) replays the shuffled demo holdout; "
+             "'episode_holdout' holds out whole episodes/runs; 'temporal' replays the "
+             "chronological tail; 'all' includes rows used in training.",
     )
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--delay", type=float, default=0.5)

@@ -15,6 +15,8 @@ def test_run_demo_help_contains_required_flags():
     # Legacy --scenario / --mode flags were removed when the synthetic-scenario
     # seeder was retired in favour of dataset-replay + Isaac Sim only.
     assert "--split" in out
+    assert "episode_holdout" in out
+    assert "temporal" in out
     assert "--model" in out
     assert "--strict-replay" in out
     assert "--no-seed" in out

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Retrain every model in services/ai/ai/models/ from scratch — exact mirror of
-services/ai/dtxai_model_training.ipynb cells 2/3/5/6/7/8/10.
+"""Retrain every model in services/ai/ai/models/ from scratch.
 
-Hyperparameter grids and split configurations match the notebook one-for-one:
+Hyperparameter grids and split configurations track the original notebook:
 
     SPLIT_CONFIGS       = (0.8/0.1/0.1), (0.7/0.2/0.1), (0.6/0.3/0.1),
                           (0.7/0.1/0.2), (0.6/0.1/0.3)
@@ -16,6 +15,10 @@ Hyperparameter grids and split configurations match the notebook one-for-one:
 
 For each model the (split × hyperparam) grid is swept and the best-F1 model is
 saved as best_<family>.pkl/.pth. Per-model best metadata is also saved.
+Splits are episode/group-aware when the dataset provides an episode/run column;
+otherwise the script derives conservative contiguous-run groups from labels.
+CNN/Bi-LSTM windows are created only after raw train/val/test group membership
+is fixed, so overlapping windows cannot cross split boundaries.
 
 After all sweeps, the overall best model (Global Winner) is selected.
 If the winner is a Tree/CNN/Bi-LSTM model, it is retrained on (train+val) 
@@ -31,8 +34,8 @@ from __future__ import annotations
 import json
 import sys
 import time
+import warnings
 from pathlib import Path
-from typing import Any
 
 import joblib
 import numpy as np
@@ -41,6 +44,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.feature_selection import f_classif
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
@@ -58,7 +62,13 @@ from torch.utils.data import DataLoader, TensorDataset
 
 import lightgbm as lgb
 import xgboost as xgb
-from pytorch_tabnet.tab_model import TabNetClassifier
+try:
+    from pytorch_tabnet.tab_model import TabNetClassifier
+except Exception as exc:  # pragma: no cover - optional training dependency
+    TabNetClassifier = None  # type: ignore[assignment]
+    TABNET_IMPORT_ERROR = exc
+else:
+    TABNET_IMPORT_ERROR = None
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AI_ROOT = REPO_ROOT / "services" / "ai"
@@ -69,8 +79,11 @@ sys.path.insert(0, str(AI_ROOT))
 from preprocessing import (  # noqa: E402
     CLASS_NAMES,
     FEATURES,
+    episode_groups,
     engineer_features,
+    find_episode_column,
     load_data,
+    split_episode_pool_and_holdout,
     split_training_pool_and_holdout,
 )
 
@@ -130,6 +143,126 @@ BILSTM_WINDOW_SIZE = 30
 
 
 # ── Notebook cell 2: prepare_splits ────────────────────────────────────────
+def _can_stratify(labels: pd.Series, test_size: float) -> bool:
+    counts = labels.value_counts()
+    if counts.empty or (counts < 2).any():
+        return False
+    n_items = len(labels)
+    n_test = max(1, int(round(n_items * test_size)))
+    n_train = n_items - n_test
+    return n_test >= labels.nunique() and n_train >= labels.nunique()
+
+
+def _group_label_table(y: pd.Series, groups: pd.Series) -> pd.DataFrame:
+    frame = pd.DataFrame({
+        "group": groups.reset_index(drop=True).astype(str),
+        "label": y.reset_index(drop=True).astype(int),
+    })
+    return (
+        frame.groupby("group", sort=False)["label"]
+        .agg(lambda s: int(s.mode().iloc[0]))
+        .reset_index()
+    )
+
+
+def _split_raw_indices(
+    y: pd.Series,
+    train_ratio: float,
+    val_ratio: float,
+    test_ratio: float,
+    random_state: int,
+    groups: pd.Series | None = None,
+) -> tuple[list[int], list[int], list[int]]:
+    """Split raw rows before any scaling/windowing.
+
+    If ``groups`` is provided, split whole episode/run groups while preserving
+    stratification at the group-majority-label level whenever the dataset has
+    enough groups per class. This is the important bit for CNN/BiLSTM: windows
+    are created only after these raw split memberships are fixed.
+    """
+    y_reset = y.reset_index(drop=True)
+    if groups is None:
+        row_idx = np.arange(len(y_reset))
+        temp_idx, test_idx = train_test_split(
+            row_idx, test_size=test_ratio, random_state=random_state, stratify=y_reset,
+        )
+        val_size_adjusted = val_ratio / (train_ratio + val_ratio)
+        train_idx, val_idx = train_test_split(
+            temp_idx, test_size=val_size_adjusted, random_state=random_state,
+            stratify=y_reset.iloc[temp_idx],
+        )
+        return sorted(train_idx.tolist()), sorted(val_idx.tolist()), sorted(test_idx.tolist())
+
+    groups_reset = groups.reset_index(drop=True).astype(str)
+    group_table = _group_label_table(y_reset, groups_reset)
+    test_stratify = (
+        group_table["label"]
+        if _can_stratify(group_table["label"], test_ratio)
+        else None
+    )
+    train_val_groups, test_groups = train_test_split(
+        group_table["group"],
+        test_size=test_ratio,
+        random_state=random_state,
+        stratify=test_stratify,
+    )
+
+    train_val_table = group_table[group_table["group"].isin(set(train_val_groups))]
+    val_size_adjusted = val_ratio / (train_ratio + val_ratio)
+    val_stratify = (
+        train_val_table["label"]
+        if _can_stratify(train_val_table["label"], val_size_adjusted)
+        else None
+    )
+    train_groups, val_groups = train_test_split(
+        train_val_table["group"],
+        test_size=val_size_adjusted,
+        random_state=random_state,
+        stratify=val_stratify,
+    )
+
+    train_set = set(train_groups.astype(str))
+    val_set = set(val_groups.astype(str))
+    test_set = set(test_groups.astype(str))
+    train_idx = np.flatnonzero(groups_reset.isin(train_set).to_numpy())
+    val_idx = np.flatnonzero(groups_reset.isin(val_set).to_numpy())
+    test_idx = np.flatnonzero(groups_reset.isin(test_set).to_numpy())
+    return sorted(train_idx.tolist()), sorted(val_idx.tolist()), sorted(test_idx.tolist())
+
+
+def _windowize_split(
+    X_part: pd.DataFrame,
+    y_part: pd.Series,
+    groups_part: pd.Series | None,
+    window: int,
+    step: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    if groups_part is None:
+        df_window = X_part.copy()
+        df_window["fault_label"] = y_part.values
+        return engineer_features(df_window, window=window, step=step)
+
+    xs: list[np.ndarray] = []
+    ys: list[np.ndarray] = []
+    df_window = X_part.copy()
+    df_window["fault_label"] = y_part.values
+    df_window["_episode_group"] = groups_part.reset_index(drop=True).astype(str).values
+    for _, group_df in df_window.groupby("_episode_group", sort=False):
+        group_df = group_df.drop(columns=["_episode_group"])
+        if len(group_df) < window:
+            continue
+        X_w, y_w = engineer_features(group_df, window=window, step=step)
+        if len(X_w):
+            xs.append(X_w)
+            ys.append(y_w)
+    if not xs:
+        raise ValueError(
+            f"No {window}-row windows could be built for this split. "
+            "Use longer episodes or a smaller window size."
+        )
+    return np.concatenate(xs, axis=0), np.concatenate(ys, axis=0)
+
+
 def prepare_splits(
     X: pd.DataFrame,
     y: pd.Series,
@@ -140,59 +273,52 @@ def prepare_splits(
     scale_and_impute: bool = True,
     window: int = 0,
     step: int = 5,
+    groups: pd.Series | None = None,
 ):
+    train_idx, val_idx, test_idx = _split_raw_indices(
+        y, train_ratio, val_ratio, test_ratio, random_state, groups=groups,
+    )
+    X_reset = X.reset_index(drop=True)
+    y_reset = y.reset_index(drop=True).astype(int)
+    groups_reset = groups.reset_index(drop=True).astype(str) if groups is not None else None
+
+    X_train_raw = X_reset.iloc[train_idx].reset_index(drop=True)
+    X_val_raw = X_reset.iloc[val_idx].reset_index(drop=True)
+    X_test_raw = X_reset.iloc[test_idx].reset_index(drop=True)
+    y_train = y_reset.iloc[train_idx].reset_index(drop=True)
+    y_val = y_reset.iloc[val_idx].reset_index(drop=True)
+    y_test = y_reset.iloc[test_idx].reset_index(drop=True)
+    groups_train = groups_reset.iloc[train_idx].reset_index(drop=True) if groups_reset is not None else None
+    groups_val = groups_reset.iloc[val_idx].reset_index(drop=True) if groups_reset is not None else None
+    groups_test = groups_reset.iloc[test_idx].reset_index(drop=True) if groups_reset is not None else None
+
     if window > 0:
-        # Path C v2: Extract windows first, then apply stratified split
-        X_temp = X.copy()
-        
         if scale_and_impute:
             scaler = build_scaling_pipeline()
-            X_scaled = pd.DataFrame(
-                scaler.fit_transform(X_temp), columns=FEATURES, index=X_temp.index
-            )
+            X_train = pd.DataFrame(scaler.fit_transform(X_train_raw), columns=FEATURES)
+            X_val = pd.DataFrame(scaler.transform(X_val_raw), columns=FEATURES)
+            X_test = pd.DataFrame(scaler.transform(X_test_raw), columns=FEATURES)
         else:
-            X_scaled = X_temp
+            X_train, X_val, X_test = X_train_raw, X_val_raw, X_test_raw
             scaler = None
-            
-        df_window = X_scaled.copy()
-        df_window["fault_label"] = y.values
-        X_w, y_w = engineer_features(df_window, window=window, step=step)
-        
-        test_val_ratio = val_ratio + test_ratio
-        X_train_w, X_temp_w, y_train_w, y_temp_w = train_test_split(
-            X_w, y_w, test_size=test_val_ratio, random_state=random_state, stratify=y_w
-        )
-        
-        val_size_adjusted = val_ratio / test_val_ratio
-        X_val_w, X_test_w, y_val_w, y_test_w = train_test_split(
-            X_temp_w, y_temp_w, test_size=val_size_adjusted, random_state=random_state, stratify=y_temp_w
-        )
-        
+
+        X_train_w, y_train_w = _windowize_split(X_train, y_train, groups_train, window, step)
+        X_val_w, y_val_w = _windowize_split(X_val, y_val, groups_val, window, step)
+        X_test_w, y_test_w = _windowize_split(X_test, y_test, groups_test, window, step)
         return X_train_w, X_val_w, X_test_w, y_train_w, y_val_w, y_test_w, scaler
 
-    # Paths A & B: Standard Random Split
-    X_temp, X_test, y_temp, y_test = train_test_split(
-        X, y, test_size=test_ratio, random_state=random_state, stratify=y,
-    )
-    val_size_adjusted = val_ratio / (train_ratio + val_ratio)
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_temp, y_temp, test_size=val_size_adjusted,
-        random_state=random_state, stratify=y_temp,
-    )
     if scale_and_impute:
         scaler = build_scaling_pipeline()
         X_train_s = pd.DataFrame(
-            scaler.fit_transform(X_train), columns=FEATURES, index=X_train.index
+            scaler.fit_transform(X_train_raw), columns=FEATURES, index=X_train_raw.index
         )
-        X_val_s = pd.DataFrame(
-            scaler.transform(X_val), columns=FEATURES, index=X_val.index
-        )
+        X_val_s = pd.DataFrame(scaler.transform(X_val_raw), columns=FEATURES, index=X_val_raw.index)
         X_test_s = pd.DataFrame(
-            scaler.transform(X_test), columns=FEATURES, index=X_test.index
+            scaler.transform(X_test_raw), columns=FEATURES, index=X_test_raw.index
         )
         return X_train_s, X_val_s, X_test_s, y_train, y_val, y_test, scaler
-    else:
-        return X_train, X_val, X_test, y_train, y_val, y_test, None
+
+    return X_train_raw, X_val_raw, X_test_raw, y_train, y_val, y_test, None
 
 
 # ── Notebook cell 3: evaluate_model (sans plotting) ────────────────────────
@@ -227,12 +353,97 @@ def split_label(t: float, v: float, te: float) -> str:
     return f"{int(t*100)}/{int(v*100)}/{int(te*100)}"
 
 
+def run_sanity_baselines(training_pool: pd.DataFrame, demo_holdout: pd.DataFrame) -> None:
+    """Print shortcut diagnostics before expensive model sweeps.
+
+    These are deliberately simple baselines. If a single shortcut feature is
+    close to the full-feature score, the dataset is probably easier than the
+    model leaderboard suggests.
+    """
+    print("\n=== Sanity baselines on canonical demo holdout ===")
+    X_train = training_pool[FEATURES]
+    y_train = training_pool["fault_label"].astype(int)
+    X_holdout = demo_holdout[FEATURES]
+    y_holdout = demo_holdout["fault_label"].astype(int)
+
+    imputer = SimpleImputer(strategy="median")
+    X_train_imp = imputer.fit_transform(X_train)
+    f_scores, _ = f_classif(X_train_imp, y_train)
+    ranking = (
+        pd.DataFrame({"feature": FEATURES, "anova_f": f_scores})
+        .sort_values("anova_f", ascending=False)
+        .reset_index(drop=True)
+    )
+    top3 = ranking.head(3)["feature"].tolist()
+
+    feature_sets = {
+        "temperature_only": ["temperature_c"] if "temperature_c" in FEATURES else [FEATURES[-1]],
+        "no_temperature": [c for c in FEATURES if c != "temperature_c"],
+        "top3_anova": top3,
+        "full": FEATURES,
+    }
+    model = lgb.LGBMClassifier(
+        n_estimators=100,
+        max_depth=3,
+        learning_rate=0.1,
+        random_state=RANDOM_STATE,
+        class_weight="balanced",
+        verbose=-1,
+    )
+
+    results = []
+    for name, columns in feature_sets.items():
+        pipe = Pipeline([
+            ("imputer", SimpleImputer(strategy="median")),
+            ("model", model.__class__(**model.get_params())),
+        ])
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="X does not have valid feature names")
+            pipe.fit(X_train[columns], y_train)
+            pred = pipe.predict(X_holdout[columns])
+        results.append({
+            "baseline": name,
+            "features": columns,
+            "feature_count": len(columns),
+            "accuracy": float(accuracy_score(y_holdout, pred)),
+            "macro_f1": float(f1_score(y_holdout, pred, average="macro")),
+            "precision": float(precision_score(y_holdout, pred, average="macro", zero_division=0)),
+        })
+
+    out = pd.DataFrame(results).sort_values("macro_f1", ascending=False)
+    print("Top ANOVA features:")
+    print(ranking.head(10).to_string(index=False, formatters={"anova_f": lambda x: f"{x:.3f}"}))
+    print("\nShortcut baseline table:")
+    print(out[["baseline", "feature_count", "accuracy", "macro_f1", "precision"]].to_string(
+        index=False,
+        formatters={
+            "accuracy": lambda x: f"{x:.4f}",
+            "macro_f1": lambda x: f"{x:.4f}",
+            "precision": lambda x: f"{x:.4f}",
+        },
+    ))
+
+    SHARED_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "top_anova_features": ranking.head(10).to_dict(orient="records"),
+        "baselines": results,
+        "notes": (
+            "If temperature_only is close to full, the dataset is shortcut-dominated. "
+            "If no_temperature collapses, non-temperature channels are not carrying the labels."
+        ),
+    }
+    (SHARED_DIR / "sanity_baselines.json").write_text(json.dumps(payload, indent=2) + "\n")
+    print(f"[save] {SHARED_DIR}/sanity_baselines.json")
+
+
 # ── Notebook cell 4: RandomForest sweep ────────────────────────────────────
-def sweep_random_forest(X, y):
+def sweep_random_forest(X, y, groups: pd.Series | None = None):
     print("\n=== RandomForest sweep (5 splits × 2 × 2 = 20 configs) ===")
     best = {"f1": -1.0}
     for tr, vr, te in SPLIT_CONFIGS:
-        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(X, y, tr, vr, te, scale_and_impute=True)
+        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(
+            X, y, tr, vr, te, scale_and_impute=True, groups=groups,
+        )
         for n in N_ESTIMATORS_LIST:
             for d in MAX_DEPTH_LIST:
                 model = RandomForestClassifier(
@@ -253,11 +464,13 @@ def sweep_random_forest(X, y):
 
 
 # ── Notebook cell 5: LightGBM sweep ────────────────────────────────────────
-def sweep_lightgbm(X, y):
+def sweep_lightgbm(X, y, groups: pd.Series | None = None):
     print("\n=== LightGBM sweep (5 splits × 2 × 2 × 2 = 40 configs) ===")
     best = {"f1": -1.0}
     for tr, vr, te in SPLIT_CONFIGS:
-        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(X, y, tr, vr, te, scale_and_impute=False)
+        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(
+            X, y, tr, vr, te, scale_and_impute=False, groups=groups,
+        )
         for n in N_ESTIMATORS_LIST:
             for d in MAX_DEPTH_LIST:
                 for lr in LEARNING_RATE_LIST:
@@ -280,11 +493,13 @@ def sweep_lightgbm(X, y):
 
 
 # ── Notebook cell 6: XGBoost sweep ─────────────────────────────────────────
-def sweep_xgboost(X, y):
+def sweep_xgboost(X, y, groups: pd.Series | None = None):
     print("\n=== XGBoost sweep (5 splits × 2 × 2 × 2 = 40 configs) ===")
     best = {"f1": -1.0}
     for tr, vr, te in SPLIT_CONFIGS:
-        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(X, y, tr, vr, te, scale_and_impute=False)
+        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(
+            X, y, tr, vr, te, scale_and_impute=False, groups=groups,
+        )
         for n in N_ESTIMATORS_LIST:
             for d in MAX_DEPTH_LIST:
                 for lr in LEARNING_RATE_LIST:
@@ -307,7 +522,7 @@ def sweep_xgboost(X, y):
 
 
 # ── Notebook cell 7: LSTM-AE+CLS sweep ─────────────────────────────────────
-def sweep_lstm_ae(X, y, num_classes: int):
+def sweep_lstm_ae(X, y, num_classes: int, groups: pd.Series | None = None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     total = (
         len(SPLIT_CONFIGS) * len(EPOCHS_LIST) * len(HIDDEN_DIM_LIST)
@@ -323,7 +538,9 @@ def sweep_lstm_ae(X, y, num_classes: int):
     best = {"f1": -1.0}
     config_idx = 0
     for tr, vr, te in SPLIT_CONFIGS:
-        X_train, X_val, X_test, y_train, y_val, y_test, scaler = prepare_splits(X, y, tr, vr, te, scale_and_impute=True)
+        X_train, X_val, X_test, y_train, y_val, y_test, scaler = prepare_splits(
+            X, y, tr, vr, te, scale_and_impute=True, groups=groups,
+        )
         X_train_t = torch.tensor(X_train.values, dtype=torch.float32, device=device).unsqueeze(1)
         X_val_t = torch.tensor(X_val.values, dtype=torch.float32, device=device).unsqueeze(1)
         y_train_t = torch.tensor(y_train.values, dtype=torch.long, device=device)
@@ -401,13 +618,29 @@ def sweep_lstm_ae(X, y, num_classes: int):
     return best, device
 
 # ── Notebook cell 8: TabNet sweep ──────────────────────────────────────────
-def sweep_tabnet(X, y):
+def sweep_tabnet(X, y, groups: pd.Series | None = None):
     print("\n=== TabNet sweep (1 fixed split × 2 × 2 = 4 configs) ===")
+    if TabNetClassifier is None:
+        print(f"[TabNet] skipped: pytorch-tabnet unavailable ({TABNET_IMPORT_ERROR})")
+        return {
+            "model": "TabNet",
+            "split": "skipped",
+            "param": "skipped",
+            "param_dict": {},
+            "accuracy": 0.0,
+            "f1": -1.0,
+            "precision": 0.0,
+            "auroc": None,
+            "skipped": True,
+            "skip_reason": f"pytorch-tabnet unavailable: {TABNET_IMPORT_ERROR}",
+        }
     best = {"f1": -1.0}
     
     # Fixed split to save extreme training times for DL models
     tr, vr, te = 0.8, 0.1, 0.1
-    X_train, X_val, X_test, y_train, y_val, y_test, scaler = prepare_splits(X, y, tr, vr, te, scale_and_impute=True)
+    X_train, X_val, X_test, y_train, y_val, y_test, scaler = prepare_splits(
+        X, y, tr, vr, te, scale_and_impute=True, groups=groups,
+    )
     
     for n_d in TABNET_N_D_LIST:
         for n_steps in TABNET_N_STEPS_LIST:
@@ -467,7 +700,7 @@ def sweep_tabnet(X, y):
     return best
 
 # ── Notebook cell 9: CNN sweep ─────────────────────────────────────────────
-def sweep_cnn(X, y, num_classes: int):
+def sweep_cnn(X, y, num_classes: int, groups: pd.Series | None = None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     total = (
         len(SPLIT_CONFIGS) * len(CNN_EPOCHS) * len(CNN_CONV_CHANNELS_LIST)
@@ -486,7 +719,7 @@ def sweep_cnn(X, y, num_classes: int):
 
     for tr, vr, te in SPLIT_CONFIGS:
         X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(
-            X, y, tr, vr, te, scale_and_impute=True, window=cnn_window_size,
+            X, y, tr, vr, te, scale_and_impute=True, window=cnn_window_size, groups=groups,
         )
 
         unique_classes = np.unique(y_train)
@@ -573,7 +806,7 @@ def sweep_cnn(X, y, num_classes: int):
     return best, device
 
 # ── Notebook cell 10: Bi-LSTM sweep ────────────────────────────────────────
-def sweep_bilstm(X, y, num_classes: int):
+def sweep_bilstm(X, y, num_classes: int, groups: pd.Series | None = None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\n=== Bi-LSTM sweep on {device} ===")
     
@@ -585,7 +818,7 @@ def sweep_bilstm(X, y, num_classes: int):
 
     for tr, vr, te in SPLIT_CONFIGS:
         X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(
-            X, y, tr, vr, te, scale_and_impute=True, window=window_size,
+            X, y, tr, vr, te, scale_and_impute=True, window=window_size, groups=groups,
         )
 
         unique_classes = np.unique(y_train)
@@ -706,7 +939,10 @@ def save_tree_artifact(best: dict, demo_holdout: pd.DataFrame, out_dir: Path,
         "decision_type": "multiclass_classifier",
         "default_threshold": None,
         "supports_tree_xai": supports_tree_xai,
-        "notes": "Trained via scripts/train_models.py — exact mirror of dtxai_model_training.ipynb cells 5/6/7.",
+        "notes": (
+            "Trained via scripts/train_models.py with stratified group-aware "
+            "splits when episode/run groups are available."
+        ),
     }
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"[save] {out_dir}/{artifact_name}  +  metadata.json")
@@ -765,8 +1001,8 @@ def save_lstm_artifact(best: dict, device: torch.device, num_classes: int,
         "decision_type": "multiclass_classifier_with_reconstruction",
         "default_threshold": 0.5,
         "notes": (
-            "Trained via scripts/train_models.py — exact mirror of "
-            "dtxai_model_training.ipynb cell 8. Architecture is "
+            "Trained via scripts/train_models.py with stratified group-aware "
+            "splits when episode/run groups are available. Architecture is "
             "ai.lstm_classifier.LSTMAutoencoderClassifier."
         ),
     }
@@ -775,6 +1011,9 @@ def save_lstm_artifact(best: dict, device: torch.device, num_classes: int,
 
 
 def save_tabnet_artifact(best: dict, demo_holdout: pd.DataFrame):
+    if best.get("skipped"):
+        print(f"[save] TabNet skipped; no artifact written ({best.get('skip_reason', 'unknown reason')})")
+        return
     out_dir = MODELS_ROOT / "tabnet"
     out_dir.mkdir(parents=True, exist_ok=True)
     
@@ -923,7 +1162,20 @@ def save_bilstm_artifact(best: dict, device: torch.device, num_classes: int, dem
 
 
 # ── Notebook cell 11: Global Leaderboard & Retrain ─────────────────────────
-def save_overall_best(best_rf, best_lgbm, best_xgb, best_tabnet, best_cnn, best_bilstm, best_lstm, X, y, demo_holdout: pd.DataFrame, device: torch.device):
+def save_overall_best(
+    best_rf,
+    best_lgbm,
+    best_xgb,
+    best_tabnet,
+    best_cnn,
+    best_bilstm,
+    best_lstm,
+    X,
+    y,
+    groups: pd.Series | None,
+    demo_holdout: pd.DataFrame,
+    device: torch.device,
+):
     # 1. Gather all candidates
     candidates = {
         "RandomForest": best_rf,
@@ -990,7 +1242,7 @@ def save_overall_best(best_rf, best_lgbm, best_xgb, best_tabnet, best_cnn, best_
 
     window_size = p.get("window", 30) if needs_windows else 0
     X_train, X_val, X_test, y_train, y_val, y_test, scaler = prepare_splits(
-        X, y, tr, vr, te, scale_and_impute=needs_scaler, window=window_size
+        X, y, tr, vr, te, scale_and_impute=needs_scaler, window=window_size, groups=groups,
     )
 
     # 4. Retrain Global Winner on Train+Val
@@ -1115,12 +1367,19 @@ def main():
     df = load_data(str(AI_ROOT / "dtx_ai_master_dataset.csv"))
     df = engineer_features(df)
 
-    # Carve out the canonical 20% demo holdout (stratified, fixed seed). Every
-    # sweep below sees only the 80% training pool — guarantees the demo replays
-    # rows the models never trained on.
-    training_pool, demo_holdout = split_training_pool_and_holdout(df)
+    # Carve out the canonical 20% holdout. When the fixed dataset provides an
+    # episode/run identifier, hold out complete episodes; otherwise preserve the
+    # legacy stratified row-level demo holdout for the current CSV.
+    source_episode_column = find_episode_column(df)
+    if source_episode_column is not None:
+        training_pool, demo_holdout = split_episode_pool_and_holdout(df)
+        holdout_mode = f"episode ({source_episode_column})"
+    else:
+        training_pool, demo_holdout = split_training_pool_and_holdout(df)
+        holdout_mode = "row-stratified"
     print(
         f"[data] training_pool={training_pool.shape}  demo_holdout={demo_holdout.shape}  "
+        f"holdout_mode={holdout_mode}  "
         f"(holdout distribution: {demo_holdout['fault_label'].value_counts().sort_index().to_dict()})"
     )
 
@@ -1129,11 +1388,20 @@ def main():
     num_classes = int(y.nunique())
     print(f"[data] using training pool {training_pool.shape}, {num_classes} classes, "
           f"distribution: {y.value_counts().sort_index().to_dict()}")
+    groups = episode_groups(training_pool)
+    episode_column = find_episode_column(training_pool)
+    group_source = episode_column or "derived contiguous fault-label runs"
+    print(
+        f"[data] split groups={groups.nunique()} source={group_source}; "
+        "sweeps are stratified by group labels when possible"
+    )
+
+    run_sanity_baselines(training_pool, demo_holdout)
 
     # Cells 5/6/7 — independent per-model sweeps.
-    best_rf = sweep_random_forest(X, y)
-    best_lgbm = sweep_lightgbm(X, y)
-    best_xgb = sweep_xgboost(X, y)
+    best_rf = sweep_random_forest(X, y, groups)
+    best_lgbm = sweep_lightgbm(X, y, groups)
+    best_xgb = sweep_xgboost(X, y, groups)
 
     save_tree_artifact(best_rf, demo_holdout, MODELS_ROOT / "random_forest", "best_rf.pkl",
                        "random_forest", supports_tree_xai=True)
@@ -1143,25 +1411,25 @@ def main():
                        "xgboost", supports_tree_xai=True)
 
     # TabNet sweep.
-    best_tabnet = sweep_tabnet(X, y)
+    best_tabnet = sweep_tabnet(X, y, groups)
     save_tabnet_artifact(best_tabnet, demo_holdout)
 
     # CNN sweep.
-    best_cnn, device = sweep_cnn(X, y, num_classes)
+    best_cnn, device = sweep_cnn(X, y, num_classes, groups)
     save_cnn_artifact(best_cnn, device, num_classes, demo_holdout)
 
     # Bi-LSTM sweep.
-    best_bilstm, device = sweep_bilstm(X, y, num_classes)
+    best_bilstm, device = sweep_bilstm(X, y, num_classes, groups)
     save_bilstm_artifact(best_bilstm, device, num_classes, demo_holdout)
 
     # Cell 7 — LSTM-AE+CLS sweep.
-    best_lstm, device = sweep_lstm_ae(X, y, num_classes)
+    best_lstm, device = sweep_lstm_ae(X, y, num_classes, groups)
     save_lstm_artifact(best_lstm, device, num_classes, demo_holdout)
 
     # Cell 11 — Global Leaderboard & Retrain.
     save_overall_best(
         best_rf, best_lgbm, best_xgb, best_tabnet, best_cnn, best_bilstm, best_lstm,
-        X, y, demo_holdout, device
+        X, y, groups, demo_holdout, device
     )
 
     print("\n[done] all artifacts retrained against current sklearn/lightgbm/xgboost/torch versions.")

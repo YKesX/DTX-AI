@@ -65,15 +65,24 @@ FEATURES = [
     "temperature_c",
 ]
 
-# Demo holdout. A fixed 20% slice of the full dataset is kept out of every
-# training run (stratified by fault_label, seed=42) so that scripts/run_demo.sh
-# and scripts/replay_dataset_demo.py can replay rows the models have never
-# seen. Training + cross-validation operate exclusively on the remaining 80%
-# pool, and the overall-best model's final test report (services/ai/ai/models/
-# */metadata.json:metrics.test_*) is computed against this holdout — so the
-# test_* numbers reflect honest generalisation, not in-pool resubstitution.
+# Demo holdout. A fixed 20% stratified row-level slice is useful for readable
+# dashboard demos because small samples cover the full class vocabulary. When
+# a dataset provides real episode/run identifiers, training can use
+# ``split_episode_pool_and_holdout`` for a stricter grouped holdout instead.
 HOLDOUT_RATIO = 0.2
 HOLDOUT_RANDOM_STATE = 42
+
+# Preferred group identifiers for honest episode-level splits. The fixed
+# dataset should include one of these columns; until then we derive a stable
+# episode group from contiguous fault-label runs so sequence models do not
+# train/test on overlapping windows from the same run.
+EPISODE_ID_CANDIDATES = [
+    "episode_id",
+    "scenario_id",
+    "run_id",
+    "simulation_run_id",
+    "trajectory_id",
+]
 
 
 _scaler_cache: dict = {}
@@ -115,11 +124,11 @@ def load_data(file_name: str = "dtx_ai_master_dataset.csv") -> pd.DataFrame:
 
 
 def split_training_pool_and_holdout(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split the full dataset into an 80% training pool and a 20% demo holdout.
+    """Split the full dataset into an 80% pool and a 20% row-level demo holdout.
 
-    Stratified on ``fault_label`` with a fixed random seed so the holdout is
-    identical for every caller (training script, notebook, demo replay).
-    The training pool index order is preserved for reproducibility.
+    Stratified on ``fault_label`` with a fixed random seed so the split is
+    identical for every caller. The pool index order is preserved for
+    reproducibility.
     """
     train_idx, holdout_idx = train_test_split(
         df.index,
@@ -130,6 +139,97 @@ def split_training_pool_and_holdout(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.
     training_pool = df.loc[sorted(train_idx)].reset_index(drop=True)
     holdout = df.loc[sorted(holdout_idx)].reset_index(drop=True)
     return training_pool, holdout
+
+
+def find_episode_column(df: pd.DataFrame) -> str | None:
+    """Return the first known episode/run identifier column in ``df``."""
+    for column in EPISODE_ID_CANDIDATES:
+        if column in df.columns:
+            return column
+    return None
+
+
+def episode_groups(df: pd.DataFrame) -> pd.Series:
+    """Return a group id per row for episode-aware splitting.
+
+    Prefer explicit dataset columns such as ``episode_id`` or ``scenario_id``.
+    If the current CSV does not have one, fall back to contiguous label runs.
+    That fallback is intentionally conservative for telemetry windows: it
+    prevents a train window and a test window from sharing neighbouring frames.
+    """
+    explicit_column = find_episode_column(df)
+    if explicit_column is not None:
+        return df[explicit_column].astype(str).reset_index(drop=True)
+
+    if "fault_label" not in df.columns:
+        return pd.Series(df.index.astype(str), index=df.index).reset_index(drop=True)
+
+    labels = df["fault_label"].reset_index(drop=True)
+    return labels.ne(labels.shift()).cumsum().astype(str)
+
+
+def _group_labels(df: pd.DataFrame, groups: pd.Series) -> pd.DataFrame:
+    labels = df["fault_label"].reset_index(drop=True)
+    group_frame = pd.DataFrame({"group": groups.reset_index(drop=True), "label": labels})
+    return (
+        group_frame.groupby("group", sort=False)["label"]
+        .agg(lambda s: int(s.mode().iloc[0]))
+        .reset_index()
+    )
+
+
+def _can_stratify_group_labels(labels: pd.Series, test_size: float) -> bool:
+    counts = labels.value_counts()
+    if counts.empty or (counts < 2).any():
+        return False
+    n_groups = len(labels)
+    n_test = max(1, int(round(n_groups * test_size)))
+    n_train = n_groups - n_test
+    return n_test >= labels.nunique() and n_train >= labels.nunique()
+
+
+def split_episode_pool_and_holdout(
+    df: pd.DataFrame,
+    holdout_ratio: float = HOLDOUT_RATIO,
+    random_state: int = HOLDOUT_RANDOM_STATE,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split by episode/run group, stratifying group labels when possible."""
+    groups = episode_groups(df)
+    group_frame = _group_labels(df, groups)
+    stratify = (
+        group_frame["label"]
+        if _can_stratify_group_labels(group_frame["label"], holdout_ratio)
+        else None
+    )
+    train_groups, holdout_groups = train_test_split(
+        group_frame["group"],
+        test_size=holdout_ratio,
+        random_state=random_state,
+        stratify=stratify,
+    )
+    train_set = set(train_groups.astype(str))
+    holdout_set = set(holdout_groups.astype(str))
+    train_mask = groups.astype(str).isin(train_set)
+    holdout_mask = groups.astype(str).isin(holdout_set)
+    training_pool = df.loc[train_mask.values].reset_index(drop=True)
+    holdout = df.loc[holdout_mask.values].reset_index(drop=True)
+    return training_pool, holdout
+
+
+def split_temporal_pool_and_holdout(
+    df: pd.DataFrame,
+    holdout_ratio: float = HOLDOUT_RATIO,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Chronological split for drift/generalisation diagnostics."""
+    if df.empty:
+        return df.copy(), df.copy()
+    ordered = df.sort_values("timestamp_s").reset_index(drop=True) if "timestamp_s" in df.columns else df.reset_index(drop=True)
+    split_idx = max(1, int(len(ordered) * (1.0 - holdout_ratio)))
+    split_idx = min(split_idx, len(ordered) - 1) if len(ordered) > 1 else 1
+    return (
+        ordered.iloc[:split_idx].copy().reset_index(drop=True),
+        ordered.iloc[split_idx:].copy().reset_index(drop=True),
+    )
 
 
 def get_training_pool(df: pd.DataFrame) -> pd.DataFrame:

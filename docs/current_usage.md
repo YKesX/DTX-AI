@@ -42,35 +42,26 @@ Dashboard pages:
 - `/` — operations dashboard with live event flow, explanation panel, operator actions, and asset drilldown chart
 - `/validation` — replay validation page with summary cards, class distributions, confusion matrix, and recent replay rows
 
-## 4) Synthetic demo mode
+## 4) Dataset replay validation mode
 
-One-command path:
-
-```bash
-bash scripts/run_demo.sh --mode synthetic --scenario mixed --count 10 --delay 0.8
-```
-
-Scenarios: `normal`, `bearing_fault`, `overheating`, `combined`, `mixed`, `gradual_drift`, `intermittent_spike`
-
-Direct generator:
+Replay dataset rows through the same `POST /events/` path:
 
 ```bash
-python scripts/seed_demo_events.py --scenario mixed --count 10 --delay 0.8
-```
-
-## 5) Dataset replay validation mode
-
-Replay held-out chronological rows through the same `POST /events/` path:
-
-```bash
-bash scripts/run_demo.sh --mode replay --model random_forest --split test --count 100 --delay 0.5 --strict-replay
+bash scripts/run_demo.sh --model random_forest --split holdout --count 100 --delay 0.5 --strict-replay
 ```
 
 Direct replay script:
 
 ```bash
-python scripts/replay_dataset_demo.py --model random_forest --split test --limit 100 --delay 0.5 --source ziya --strict
+python scripts/replay_dataset_demo.py --model random_forest --split episode_holdout --limit 100 --delay 0.5 --strict
 ```
+
+Replay splits:
+
+- `holdout`: shuffled stratified demo holdout for a readable dashboard demo
+- `episode_holdout`: grouped episode/run holdout for honest validation
+- `temporal`: chronological tail for drift checks
+- `all`: whole dataset, including rows used in training
 
 Replay metadata sent with each event:
 
@@ -84,14 +75,14 @@ API enriches output metadata with:
 - `runtime_model`, `runtime_model_family`
 - `predicted_label`, `prediction_correct`, `predicted_score`
 
-## 6) Model selection and strict behavior
+## 5) Model selection and strict behavior
 
 - Standard mode: loader may fallback to another enabled model when selected one fails.
 - Strict replay mode: selected model must load, otherwise request fails loudly.
 - Strict replay does not silently fallback to stub.
 - LSTM-AE strict replay requires numeric `default_threshold` in metadata.
 
-## 7) Artifact locations
+## 6) Artifact locations
 
 - Registry/shared:
   - [services/ai/ai/models/shared/model_registry.json](../services/ai/ai/models/shared/model_registry.json)
@@ -103,7 +94,7 @@ API enriches output metadata with:
   - [services/ai/ai/models/xgboost](../services/ai/ai/models/xgboost)
   - [services/ai/ai/models/lstm_ae](../services/ai/ai/models/lstm_ae)
 
-## 8) Interpreting dashboard replay results
+## 7) Interpreting dashboard replay results
 
 In replay mode, table/panel now show:
 
@@ -116,7 +107,7 @@ In replay mode, table/panel now show:
 - operator workflow state (`new`, `acknowledged`, `assigned`, `escalated`, `resolved`)
 - running replay accuracy cards from `/metrics/live`
 
-## 9) Operator workflow
+## 8) Operator workflow
 
 The operations dashboard now supports per-alert operator actions:
 
@@ -132,7 +123,7 @@ Backend endpoints:
 
 The selected-event panel uses these endpoints to show current operator status, assignee, and action history.
 
-## 10) Asset drilldown
+## 9) Asset drilldown
 
 Selecting an event now triggers an asset-specific history fetch:
 
@@ -145,7 +136,7 @@ This powers the drilldown chart for:
 - pressure
 - anomaly score
 
-## 11) Test matrix
+## 10) Test matrix
 
 Current automated suite is organized into three layers:
 
@@ -174,7 +165,7 @@ PYTHONPATH="packages:services:services/ai:apps/api:apps/sim" .venv/bin/pytest -q
 
 Current local baseline after the new unit-test additions: `54 passed`.
 
-## 12) Later stages (not current path)
+## 11) Later stages (not current path)
 
 - Isaac Sim live integration
 - hardware sensor ingestion

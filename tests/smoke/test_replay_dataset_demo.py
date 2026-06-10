@@ -75,3 +75,17 @@ def test_prepare_replay_rows_shuffle_covers_multiple_classes_in_first_30():
     )
     classes_in_first_30 = set(rows["fault_label_name"].unique())
     assert len(classes_in_first_30) >= 4
+
+
+def test_prepare_replay_rows_supports_honest_split_modes():
+    episode_rows = replay.prepare_replay_rows(
+        split="episode_holdout", limit=30, shuffle=True, shuffle_seed=42,
+    )
+    temporal_rows = replay.prepare_replay_rows(
+        split="temporal", limit=30, shuffle=False,
+    )
+
+    assert len(episode_rows) == 30
+    assert len(temporal_rows) == 30
+    assert "_episode_group" in episode_rows.columns
+    assert "_episode_group" in temporal_rows.columns

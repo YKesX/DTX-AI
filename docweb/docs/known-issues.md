@@ -12,7 +12,7 @@ The training dataset is now produced by Isaac Sim and uses 19 sensor channels, b
 
 | Issue | Detail |
 |---|---|
-| **Rows sorted by label** | `fault_label` lives in 6 contiguous 1 800-row blocks. Random `train_test_split` consequently sees adjacent rows in train and test. Use the chronological split (`scripts/replay_dataset_demo.py:chronological_split`) for honest evaluation. |
+| **Rows sorted by label** | `fault_label` lives in long contiguous runs. Row-level random splits can place adjacent frames in train and test. Use `--split episode_holdout` for grouped validation or `--split temporal` for chronological drift checks. |
 | **Per-class signatures barely overlap** | A 3-deep decision stump on `(power_dissipated_w, pseudo_pressure_pa, roller_fl_velocity)` already separates most pairs. The classifier isn't really doing hard work yet. |
 | **No fault precursors** | The CSV jumps directly from `nominal` to a steady fault state with no transition region. The model never sees ambiguous near-boundary events. |
 | **No mixed faults** | There is no `wheel_slip + overheat` regime. Compound faults will collapse to whichever class is closest. |

@@ -23,10 +23,10 @@ usage() {
   cat <<'EOF'
 Usage: bash scripts/run_demo.sh [options]
   --setup                 Run scripts/setup.sh first
-  --split <name>          holdout|all (default: holdout — rows no model has seen)
+  --split <name>          holdout|episode_holdout|temporal|all (default: holdout)
   --count <n>             Number of rows to replay (default: 100)
   --delay <seconds>       Delay between events (default: 0.5)
-  --model <model_key>     Override active model (lightgbm|random_forest|xgboost|lstm_ae)
+  --model <model_key>     Override active model (lightgbm|random_forest|xgboost|lstm_ae|cnn|bilstm|tabnet)
   --strict-replay         Enable strict model validation in replay mode
   --no-seed               Start API + dashboard only, skip replay
   -h, --help              Show help
@@ -47,8 +47,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$SPLIT" != "holdout" && "$SPLIT" != "all" ]]; then
-  echo "Invalid --split value: $SPLIT (use holdout|all)" >&2
+if [[ "$SPLIT" != "holdout" && "$SPLIT" != "episode_holdout" && "$SPLIT" != "temporal" && "$SPLIT" != "all" ]]; then
+  echo "Invalid --split value: $SPLIT (use holdout|episode_holdout|temporal|all)" >&2
   exit 1
 fi
 

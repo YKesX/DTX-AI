@@ -12,20 +12,25 @@ The repo ships with a **dataset replay validation mode** that proves trained mod
 
 ## Dataset Replay Mode
 
-The replay system feeds rows from the chronological tail of
-`services/ai/dtx_ai_master_dataset.csv` through the live `POST /events/`
-endpoint. Each row includes a `ground_truth_label` (numeric class code) and
-`ground_truth_name` (canonical class string) in the `metadata` field, which
-the API uses to update accuracy counters **without bypassing the real
-inference pipeline**.
+The replay system feeds rows from `services/ai/dtx_ai_master_dataset.csv`
+through the live `POST /events/` endpoint. Each row includes a
+`ground_truth_label` (numeric class code) and `ground_truth_name` (canonical
+class string) in the `metadata` field, which the API uses to update accuracy
+counters **without bypassing the real inference pipeline**.
 
 :::info Key Design Decision
 Replay events travel through the **identical code path** as Isaac Sim events. There is no separate mock inference path — this validates the full stack end-to-end.
 :::
 
 ```bash
-# Replay with LightGBM (default split = test, default limit = 100)
+# Pretty dashboard demo: shuffled stratified holdout
 python scripts/replay_dataset_demo.py --model lightgbm
+
+# Honest grouped validation: hold out complete episodes/runs
+python scripts/replay_dataset_demo.py --model lightgbm --split episode_holdout
+
+# Drift check: chronological tail
+python scripts/replay_dataset_demo.py --model lightgbm --split temporal
 
 # Strict mode — model + class_mapping must load
 python scripts/replay_dataset_demo.py --model lightgbm --strict --limit 500

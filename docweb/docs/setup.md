@@ -62,8 +62,11 @@ Starts both services as background processes:
 The legacy hand-crafted synthetic-scenario seeder was retired when the dataset switched to the Isaac-Sim 19-channel schema. The supported demo flow is dataset replay:
 
 ```bash
-# Boot API + dashboard + replay the held-out tail of the dataset
+# Boot API + dashboard + replay the shuffled demo holdout
 bash scripts/run_demo.sh
+
+# Honest grouped replay: complete episodes/runs are held out together
+bash scripts/run_demo.sh --split episode_holdout
 
 # Strict mode (no fallbacks; model + class_mapping must load)
 bash scripts/run_demo.sh --strict-replay --model lightgbm

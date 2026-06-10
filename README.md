@@ -78,23 +78,24 @@ In strict replay mode:
 
 ## Demo modes
 
-### A) Synthetic scenario demo
+### Dataset replay validation demo
 
 ```bash
-bash scripts/run_demo.sh --mode synthetic --scenario mixed --count 10 --delay 0.8
-```
-
-### B) Dataset replay validation demo (held-out chronological rows)
-
-```bash
-bash scripts/run_demo.sh --mode replay --model random_forest --split test --count 100 --delay 0.5 --strict-replay
+bash scripts/run_demo.sh --model random_forest --split holdout --count 100 --delay 0.5 --strict-replay
 ```
 
 Direct replay command:
 
 ```bash
-python scripts/replay_dataset_demo.py --model random_forest --split test --limit 100 --delay 0.5 --source ziya --strict
+python scripts/replay_dataset_demo.py --model random_forest --split episode_holdout --limit 100 --delay 0.5 --strict
 ```
+
+Replay splits:
+
+- `holdout`: shuffled stratified demo holdout for dashboard demos
+- `episode_holdout`: grouped holdout for honest episode/run validation
+- `temporal`: chronological tail for drift checks
+- `all`: whole dataset, including training rows
 
 Replay events include provenance in `event.metadata`:
 
