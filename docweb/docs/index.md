@@ -7,7 +7,7 @@ sidebar_position: 1
 
 # DTX-AI — Smart Warehouse Anomaly Detection
 
-**Version:** v2.0 &nbsp;|&nbsp; **Branch:** `main` &nbsp;|&nbsp; **Date:** May 2026
+**Version:** v2.1 &nbsp;|&nbsp; **Branch:** `main` &nbsp;|&nbsp; **Date:** June 2026
 
 ---
 
@@ -27,12 +27,13 @@ Sensor frame → FastAPI → AI Pipeline (SHAP + ML) → SQLite + WebSocket → 
 
 | Feature | Details |
 |---|---|
-| **Real-time anomaly detection** | LightGBM / XGBoost / Random Forest / LSTM-AE with classification head |
+| **Real-time anomaly detection** | 7 model families: Random Forest / LightGBM / XGBoost / TabNet / CNN / Bi-LSTM / LSTM-AE with classification head |
 | **6-class fault taxonomy** | `nominal`, `bearing_wear`, `overheat`, `overload`, `pressure_fault`, `wheel_slip` |
 | **Explainable AI** | SHAP TreeExplainer — per-feature attribution for every prediction |
-| **Live dashboard** | React + WebSocket push — zero-refresh operator UI |
+| **Live dashboard** | React + WebSocket push — zero-refresh operator UI, with a Demo Control panel to start/stop demos |
 | **Operator workflow** | Acknowledge → Assign → Escalate → Resolve |
-| **Dataset replay validation** | Replay held-out rows, track running accuracy vs ground truth |
+| **Dataset replay validation** | Replay the leakage-safe per-episode temporal demo holdout, track running accuracy vs ground truth |
+| **IRL hardware demo** | ESP32 + DS18B20 + BMP280 node (`HW/`) streams live readings through the same pipeline |
 | **Isaac Sim ready** | 19-channel `EventIn` schema matches the sim's joint / IMU / drive outputs |
 
 ---
@@ -43,6 +44,7 @@ Sensor frame → FastAPI → AI Pipeline (SHAP + ML) → SQLite + WebSocket → 
 ┌─────────────────────────────────────────────────────────────┐
 │  Data Sources                                               │
 │  scripts/replay_dataset_demo.py ──► POST /events/  (HTTP)   │
+│  HW/ ESP32 ─► scripts/hw_demo_bridge.py ─► POST /events/    │
 │  Isaac Sim adapter              ──► POST /events/  (HTTP)   │
 └──────────────────────────┬──────────────────────────────────┘
                            │ HTTP :8000
@@ -67,7 +69,7 @@ Sensor frame → FastAPI → AI Pipeline (SHAP + ML) → SQLite + WebSocket → 
 |---|---|
 | Backend | FastAPI, uvicorn, aiosqlite, Pydantic v2 |
 | ML — trees | LightGBM 4.6, XGBoost 3.2, scikit-learn 1.8 |
-| ML — deep | PyTorch 2.11 + CUDA 12.8 |
+| ML — deep | PyTorch 2.11 + CUDA 12.8, pytorch-tabnet ≥ 4.1 |
 | XAI | SHAP TreeExplainer |
 | Frontend | React 18, Vite, TailwindCSS, Recharts, React Router v6 |
 | Database | SQLite (dev) |
@@ -89,14 +91,16 @@ bash scripts/run_dev.sh
 Dashboard → `http://localhost:5173`
 API docs → `http://localhost:8000/docs`
 
-Replay the held-out dataset tail through the live pipeline:
+Replay the leakage-safe demo holdout (the temporal tail of every fault run) through the live pipeline:
 
 ```bash
 bash scripts/run_demo.sh
 ```
 
+Or start a demo from the dashboard's AI Validation page via the **Demo Control** panel — including the IRL hardware demo ([Hardware Demo](/docs/hardware-demo)).
+
 ---
 
 ## Project Context
 
-Graduation project at **Atılım University, Computer Engineering**, developed as a multi-person capstone team. The `main` branch contains the active 19-channel schema, the multi-class LSTM-AE+CLS, and the dataset replay validation flow.
+Graduation project at **Atılım University, Computer Engineering**, developed as a multi-person capstone team. The `main` branch contains the active 19-channel schema, 7 retrained model families on the leakage-safe canonical split, the dataset replay validation flow, and the ESP32 hardware demo.

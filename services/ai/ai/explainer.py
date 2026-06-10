@@ -76,10 +76,20 @@ def _fallback_explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResu
 
 
 def _feature_vector(event: EventIn) -> list[float]:
-    return [float(getattr(event, name) or 0.0) for name in FEATURES]
+    # NaN for missing sensors, mirroring ai.detector — scaled models impute
+    # medians in their pipeline, LightGBM/XGBoost consume NaN natively.
+    return [
+        float(value) if (value := getattr(event, name)) is not None else float("nan")
+        for name in FEATURES
+    ]
 
 
 def explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
+    # Mirror the detector: when the stub is forced, the explanation must come
+    # from the rule-based path too — never from a model the detector ignored.
+    if os.getenv("DTX_FORCE_STUB", "0") == "1":
+        return _fallback_explain(event, anomaly)
+
     strict_replay = bool(
         os.getenv("DTX_REPLAY_STRICT", "0") == "1"
         or (event.metadata or {}).get("replay_strict") is True

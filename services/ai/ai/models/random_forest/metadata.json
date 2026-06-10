@@ -1,11 +1,11 @@
 {
   "model_name": "best_rf.pkl",
   "model_family": "random_forest",
+  "trained_at": "2026-06-10T12:08:02+00:00",
   "trained_on_dataset": "dtx_ai_master_dataset.csv",
   "feature_count": 19,
   "num_classes": 6,
   "feature_order_ref": "services/ai/models/shared/feature_order.json",
-  "scaler_required": true,
   "class_mapping": {
     "0": "nominal",
     "1": "bearing_wear",
@@ -14,22 +14,24 @@
     "4": "pressure_fault",
     "5": "wheel_slip"
   },
-  "training_split": "60/10/30",
+  "training_split": "episode-temporal 60/20/20 (train/val/demo-holdout), purge gap 60 rows",
   "best_params": {
-    "n_estimators": 200,
-    "max_depth": 5
+    "n_estimators": 400,
+    "max_depth": null
   },
+  "leakage_controls": "per-episode temporal split with purge gap; demo holdout is the future tail of every fault run and is never used in training",
+  "scaler_required": true,
+  "scaler_path": "services/ai/models/random_forest/scaler.pkl",
   "metrics": {
-    "val_accuracy": 0.304861,
-    "val_f1": 0.36926,
-    "val_precision": 0.684374,
-    "val_auroc": 0.744592,
-    "test_accuracy": 0.303973,
-    "test_f1": 0.369957,
-    "test_precision": 0.692638
+    "val_accuracy": 0.992721,
+    "val_f1": 0.993003,
+    "val_precision": 0.993205,
+    "val_auroc": 0.999861,
+    "test_accuracy": 0.99753,
+    "test_f1": 0.997682,
+    "test_precision": 0.997723
   },
   "decision_type": "multiclass_classifier",
   "default_threshold": null,
-  "supports_tree_xai": true,
-  "notes": "Trained via scripts/train_models.py \u2014 exact mirror of dtxai_model_training.ipynb cells 5/6/7."
+  "supports_tree_xai": true
 }

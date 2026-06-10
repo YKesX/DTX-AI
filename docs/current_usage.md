@@ -16,7 +16,7 @@ This creates `.venv`, installs API/AI dependencies, installs dashboard dependenc
 
 Common:
 
-- `DTX_ACTIVE_MODEL` (optional): `lightgbm|random_forest|xgboost|lstm_ae`
+- `DTX_ACTIVE_MODEL` (optional): `random_forest|lightgbm|xgboost|tabnet|cnn|bilstm|lstm_ae`
 - `DTX_REPLAY_STRICT` (optional): `1` to force strict real-model replay behavior
 
 Backend:
@@ -58,7 +58,7 @@ python scripts/replay_dataset_demo.py --model random_forest --split episode_hold
 
 Replay splits:
 
-- `holdout`: shuffled stratified demo holdout for a readable dashboard demo
+- `holdout` (default): the leakage-safe demo holdout — the last 20% of every contiguous fault run, separated from training data by a 60-row purge gap (shuffled for a readable dashboard demo)
 - `episode_holdout`: grouped episode/run holdout for honest validation
 - `temporal`: chronological tail for drift checks
 - `all`: whole dataset, including rows used in training
@@ -75,6 +75,19 @@ API enriches output metadata with:
 - `runtime_model`, `runtime_model_family`
 - `predicted_label`, `prediction_correct`, `predicted_score`
 
+### Demo control from the dashboard
+
+Both demos can also be started from the dashboard: the AI Validation page has a **Demo Control** panel that picks the mode (Dataset demo vs IRL demo/ESP32), model, split, and count, starts/stops the run, and tails the demo log. It drives the backend `/demo` routes:
+
+- `GET /demo/models` — enabled model keys
+- `GET /demo/status` — running state, params, log tail
+- `POST /demo/start` — spawn `scripts/replay_dataset_demo.py` or `scripts/hw_demo_bridge.py` (409 if already running)
+- `POST /demo/stop` — terminate the running demo
+
+### IRL hardware demo (ESP32)
+
+`scripts/hw_demo_bridge.py` polls the ESP32 node (`HW/`, DS18B20 + BMP280), maps the two real channels onto the dataset vocabulary, synthesizes the rest from nominal training-pool stats, and POSTs into `/events/` with `metadata.source=hardware_demo`. See [docs/hardware_demo.md](hardware_demo.md) for wiring, flashing, and usage.
+
 ## 5) Model selection and strict behavior
 
 - Standard mode: loader may fallback to another enabled model when selected one fails.
@@ -87,11 +100,17 @@ API enriches output metadata with:
 - Registry/shared:
   - [services/ai/ai/models/shared/model_registry.json](../services/ai/ai/models/shared/model_registry.json)
   - [services/ai/ai/models/shared/feature_order.json](../services/ai/ai/models/shared/feature_order.json)
-  - [services/ai/ai/models/shared/scaler.pkl](../services/ai/ai/models/shared/scaler.pkl)
+  - [services/ai/ai/models/shared/scaler.pkl](../services/ai/ai/models/shared/scaler.pkl) (fallback — each scaled family ships its own `scaler.pkl`)
+  - [services/ai/ai/models/shared/leaderboard.json](../services/ai/ai/models/shared/leaderboard.json) (val/holdout metrics + winner)
+  - [services/ai/ai/models/shared/sanity_baselines.json](../services/ai/ai/models/shared/sanity_baselines.json)
+  - `services/ai/ai/models/shared/model_best.pth` (global winner checkpoint, currently CNN)
 - Model families:
   - [services/ai/ai/models/lightgbm](../services/ai/ai/models/lightgbm)
   - [services/ai/ai/models/random_forest](../services/ai/ai/models/random_forest)
   - [services/ai/ai/models/xgboost](../services/ai/ai/models/xgboost)
+  - [services/ai/ai/models/tabnet](../services/ai/ai/models/tabnet)
+  - [services/ai/ai/models/cnn](../services/ai/ai/models/cnn)
+  - [services/ai/ai/models/bilstm](../services/ai/ai/models/bilstm)
   - [services/ai/ai/models/lstm_ae](../services/ai/ai/models/lstm_ae)
 
 ## 7) Interpreting dashboard replay results
@@ -163,10 +182,11 @@ PYTHONPATH="packages:services:services/ai:apps/api:apps/sim" .venv/bin/pytest -q
 .venv/bin/pytest -q tests/integration
 ```
 
-Current local baseline after the new unit-test additions: `54 passed`.
+Current local baseline: `56 passed`.
 
 ## 11) Later stages (not current path)
 
 - Isaac Sim live integration
-- hardware sensor ingestion
-- unified offline benchmark protocol across model families
+- harder, noisier simulation data (the current dataset is still highly separable — see [docs/isaac_sim_integration.md](isaac_sim_integration.md))
+
+Hardware sensor ingestion is now implemented — see the IRL hardware demo above and [docs/hardware_demo.md](hardware_demo.md). All 7 model families are benchmarked on the same canonical split in `services/ai/ai/models/shared/leaderboard.json`.

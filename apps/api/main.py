@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.database import init_db
 from api.routes.alerts import router as alerts_router
 from api.routes.assets import router as assets_router
+from api.routes.demo import router as demo_router
 from api.routes.events import router as events_router
 from api.routes.health import router as health_router
 from api.routes.metrics import router as metrics_router
@@ -50,6 +51,7 @@ app.add_middleware(
 
 app.include_router(health_router, tags=["health"])
 app.include_router(events_router, prefix="/events", tags=["events"])
+app.include_router(demo_router, prefix="/demo", tags=["demo"])
 app.include_router(alerts_router, prefix="/alerts", tags=["alerts"])
 app.include_router(assets_router, prefix="/assets", tags=["assets"])
 app.include_router(metrics_router, prefix="/metrics", tags=["metrics"])

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import DemoControlPanel from '../components/validation/DemoControlPanel';
 import ReplaySummaryCards from '../components/validation/ReplaySummaryCards';
 import ClassDistributionCharts from '../components/validation/ClassDistributionCharts';
 import ConfusionMatrix from '../components/validation/ConfusionMatrix';
@@ -31,7 +32,11 @@ export default function Validation() {
           if (cancelled) return;
           setMetrics(metricsBody);
           const normalized = normalizeAlerts(alertsBody.alerts ?? []);
-          setEvents(normalized.filter((event) => event.source === 'dataset_replay'));
+          setEvents(
+            normalized.filter((event) =>
+              ['dataset_replay', 'hardware_demo'].includes(event.source)
+            )
+          );
         })
         .catch(() => {
           if (cancelled) return;
@@ -61,6 +66,8 @@ export default function Validation() {
           Replay-mode performance, class distributions, and model behavior
         </p>
       </div>
+
+      <DemoControlPanel />
 
       <ReplaySummaryCards metrics={metrics} />
 

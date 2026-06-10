@@ -158,6 +158,72 @@ In-memory replay validation metrics snapshot.
 
 ---
 
+### `GET /demo/models`
+Model registry keys the demo selector can offer (enabled models only).
+
+**Response 200:**
+```json
+{ "models": ["lightgbm", "lstm_ae", "random_forest", "xgboost", "cnn", "tabnet", "bilstm"] }
+```
+
+---
+
+### `GET /demo/status`
+State of the demo runner process plus the tail of its log.
+
+**Response 200:**
+```json
+{
+  "running": true,
+  "mode": "dataset",
+  "params": { "mode": "dataset", "model": "lightgbm", "split": "holdout", "count": 100, "delay": 0.5, "strict": false, "esp32_url": "http://dtx-esp32.local", "interval": 1.0 },
+  "started_at": "2026-06-10T12:00:00+00:00",
+  "returncode": null,
+  "log_tail": ["[12/100] gt=overheat pred=overheat ok"]
+}
+```
+
+`mode` and `params` are `null`/empty when no demo has been started; `returncode` is set once the subprocess exits.
+
+---
+
+### `POST /demo/start`
+Start a demo run. Spawns `scripts/replay_dataset_demo.py` (`mode: "dataset"`) or `scripts/hw_demo_bridge.py` (`mode: "hardware"`) as a subprocess. Only one demo runs at a time.
+
+**Request body:**
+
+| Field | Type | Default | Applies to | Description |
+|---|---|---|---|---|
+| `mode` | `"dataset"` or `"hardware"` | — (required) | both | Demo type |
+| `model` | `str` | `lightgbm` | both | Must be an enabled registry key (422 otherwise) |
+| `split` | `"holdout"` / `"episode_holdout"` / `"temporal"` / `"all"` | `holdout` | dataset | Replay split — `holdout` is the leakage-safe per-episode temporal tail |
+| `count` | `int` (0–100000) | `100` | both | Events to send (0 = unlimited for hardware mode) |
+| `delay` | `float` (0–60) | `0.5` | dataset | Seconds between events |
+| `strict` | `bool` | `false` | dataset | Strict replay mode |
+| `esp32_url` | `str` | `http://dtx-esp32.local` | hardware | ESP32 node base URL |
+| `interval` | `float` (0.05–60) | `1.0` | hardware | Polling interval in seconds |
+
+**Response 202:**
+```json
+{ "started": true, "mode": "dataset", "pid": 12345 }
+```
+
+**Response 409** if a demo is already running.
+
+---
+
+### `POST /demo/stop`
+Terminate the running demo subprocess.
+
+**Response 200:**
+```json
+{ "stopped": true, "returncode": -15 }
+```
+
+Returns `{ "stopped": false, "detail": "No demo is running." }` when nothing is running.
+
+---
+
 ### `WS /ws/events`
 Real-time push endpoint. Each ingested event broadcasts a full [`DashboardAlert`](/docs/data-models#dashboardalert) JSON object to all connected clients.
 
@@ -198,6 +264,9 @@ After broadcasting, `_try_notify_sim(twin_update)` attempts to import and call t
 | On mount | `GET /alerts/` |
 | Every 2 s (Dashboard) | `GET /metrics/live` |
 | Every 4 s (Validation) | `GET /metrics/live` + `GET /alerts/?limit=100` |
+| Every 3 s (Demo Control panel) | `GET /demo/status` |
+| On Validation mount | `GET /demo/models` |
+| Demo start/stop | `POST /demo/start` / `POST /demo/stop` |
 | On event select | `GET /assets/{id}/timeline` + `GET /alerts/{id}/actions` |
 | Operator action | `POST /alerts/{id}/actions` |
 | Clear Logs | `DELETE /alerts/clear` |

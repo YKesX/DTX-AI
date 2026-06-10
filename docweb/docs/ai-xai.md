@@ -12,16 +12,19 @@ All ML inference and explainability logic lives in `services/ai/`. It is importe
 
 ## Model Registry
 
-Four model families are supported. Active model is selected by event `metadata.active_model`, then the `DTX_ACTIVE_MODEL` env var, then `model_registry.json`'s `active_model`.
+Seven model families are supported. Active model is selected by event `metadata.active_model`, then the `DTX_ACTIVE_MODEL` env var, then `model_registry.json`'s `active_model`.
 
-| Model | Artifact | Family | XAI Support | Test F1 |
+| Model | Artifact | Registry key | XAI Support | Demo-holdout macro F1 |
 |---|---|---|---|---|
-| LightGBM | `best_lgbm.pkl` | `lightgbm` | ✅ SHAP TreeExplainer | 0.9991 |
-| XGBoost | `best_xgb.pkl` | `xgboost` | ✅ SHAP TreeExplainer | 0.9991 |
-| Random Forest | `best_rf.pkl` | `random_forest` | ✅ SHAP TreeExplainer | 0.9985 |
-| LSTM-AE + classifier head | `best_lstmae.pth` | `lstm_autoencoder_pytorch` | ❌ Fallback only | 0.9981 |
+| Random Forest | `best_rf.pkl` | `random_forest` | ✅ SHAP TreeExplainer | 0.9977 |
+| LightGBM | `best_lgbm.pkl` | `lightgbm` | ✅ SHAP TreeExplainer | 0.9982 |
+| XGBoost | `best_xgb.pkl` | `xgboost` | ✅ SHAP TreeExplainer | 0.9985 |
+| TabNet | `best_tabnet.zip` | `tabnet` | ❌ Fallback only | 0.9953 |
+| 1-D CNN (windowed) | `best_cnn.pth` | `cnn` | ❌ Fallback only | 0.9920 |
+| Bi-LSTM (windowed) | `best_bilstm.pth` | `bilstm` | ❌ Fallback only | 1.0000 |
+| LSTM-AE + classifier head | `best_lstmae.pth` | `lstm_ae` | ❌ Fallback only | 0.9967 |
 
-Models are loaded once on first call and cached in-process via `model_loader.py`. The metrics above are on a stratified-random 20% held-out test split and should be read as "the model has learned the regime labels of the synthetic-ish dataset"; see [Known Issues](/docs/known-issues) for why these numbers are not yet trustworthy.
+Models are loaded once on first call and cached in-process via `model_loader.py`. The metrics above come from `shared/leaderboard.json` and are measured on the **leakage-safe demo holdout** — the per-episode temporal tail (last 20% of every contiguous fault run, with a 60-row purge gap; see the Retraining section below). The global winner — selected on validation F1, ties broken deterministically — is the **CNN**, saved as `shared/model_best.pth`. Near-perfect scores are now a property of the dataset's separability, not split leakage; see [Known Issues](/docs/known-issues).
 
 ---
 
@@ -42,7 +45,7 @@ and persisted to `services/ai/ai/models/shared/feature_order.json`. No rolling-w
 | Rollers | `roller_fl_velocity`, `roller_fr_velocity`, `roller_bl_velocity`, `roller_br_velocity` |
 | Bulk | `power_dissipated_w`, `temperature_c` |
 
-A `StandardScaler` fit on the training split is applied before every inference call via `services/ai/ai/models/shared/scaler.pkl`. Feature order is positional — both the scaler and the model must see channels in the FEATURES order.
+Scaled model families ship their own `scaler.pkl` inside the family directory (e.g. `services/ai/ai/models/cnn/scaler.pkl`); the runtime loader prefers the per-family scaler and only falls back to `shared/scaler.pkl` (which is always refreshed by training). LightGBM and XGBoost are intentionally **unscaled** (`requires_scaler: false`) and consume NaN sensor dropouts natively. Feature order is positional — both the scaler and the model must see channels in the FEATURES order.
 
 ---
 
@@ -53,9 +56,11 @@ For each incoming `EventIn`, `ai.pipeline.run_pipeline` executes:
 ```
 1. Build 19-channel feature vector from EventIn fields
    (missing channels → 0.0)
-2. Apply StandardScaler (scaler.pkl)
+2. Apply the model family's StandardScaler (per-family scaler.pkl;
+   skipped for LightGBM/XGBoost, which consume raw values + NaN)
 3. Run the active model:
-     • Tree model: predict_proba → argmax class + max-prob
+     • Tree model / TabNet: predict_proba → argmax class + max-prob
+     • CNN / Bi-LSTM (windowed): infer on the last 30 buffered events
      • LSTM-AE+CLS: forward → (reconstruction, logits)
                     softmax(logits) → argmax class + class confidence
 4. Map class id → AnomalyType + Severity via detector._CLASS_MAP
@@ -65,6 +70,10 @@ For each incoming `EventIn`, `ai.pipeline.run_pipeline` executes:
 ```
 
 `run_pipeline` is async and offloads CPU-bound inference to `asyncio.to_thread`.
+
+### Windowed models (CNN, Bi-LSTM)
+
+CNN and Bi-LSTM are trained on **30-step sliding windows** built per-episode, so windows never cross fault-run boundaries. At runtime the detector buffers incoming events and **falls back to the rule-based detector until 30 events have accumulated**; once the buffer is full it runs windowed inference on the most recent 30 frames. The buffer size is read from each model's `best_params.window` metadata.
 
 The LSTM-AE+CLS also stamps the following diagnostic fields into `event.metadata` so downstream tooling can inspect the model's view:
 
@@ -92,7 +101,7 @@ LSTM decoder ──► Linear ─► reconstruction (B, 1, 19)      Linear ─ R
                                                           ─► logits (B, num_classes)
 ```
 
-Best hyperparameters on the current dataset: `epochs=50, hidden=32, latent=8, lr=1e-3, batch=64, λ_recon=1.0, λ_cls=1.0`.
+Best hyperparameters on the current dataset: `hidden=32, latent=16, lr=1e-3, batch=64, dropout=0.2, λ_recon=1.0, λ_cls=1.0` — training is capped at 20 epochs (anti-memorisation cap) and keeps the best-validation-F1 epoch.
 
 ---
 
@@ -108,8 +117,8 @@ shap_values = explainer.shap_values(X)
 
 The top-3 features by absolute SHAP value are surfaced in the dashboard `ExplanationPanel` as a horizontal bar chart, making the model's reasoning visible to operators.
 
-### LSTM-AE Explainability
-LSTM-AE does **not** support SHAP (`supports_tree_xai: false` in registry). When active, `explain()` returns a generic per-class summary string — no per-feature attribution. Adding `DeepExplainer` support is tracked in [Known Issues](/docs/known-issues).
+### Deep / non-tree model explainability
+TabNet, CNN, Bi-LSTM and LSTM-AE do **not** support SHAP TreeExplainer (`supports_tree_xai: false` in registry). When one of them is active, `explain()` returns a generic per-class summary string — no per-feature attribution. Adding `DeepExplainer` support is tracked in [Known Issues](/docs/known-issues).
 
 ---
 
@@ -158,4 +167,14 @@ source .venv/bin/activate
 python scripts/train_models.py
 ```
 
-The script is a one-for-one mirror of [`services/ai/dtxai_model_training.ipynb`](https://github.com/YKesX/DTX-AI/blob/main/services/ai/dtxai_model_training.ipynb) cells 2–10: 5-split × per-model HP sweep (220 fits total), GPU is used automatically for the LSTM via PyTorch if a CUDA-capable device is present. On an RTX 3070 Ti the full run takes ~15 minutes.
+The training methodology (shared by all 7 families):
+
+1. **Single fixed canonical split** — no more sweeping multiple split configurations. The demo holdout is the **last 20% of every contiguous fault run** (per-episode temporal), with a 60-row purge gap (`PURGE_GAP_ROWS`) dropped between pool and holdout so no demo frame is adjacent to — or shares a sliding window with — any training frame. Train/val inside the remaining pool uses the same per-run temporal mechanics (75/25, again purge-gapped). Split functions: `split_demo_pool_and_holdout`, `split_pool_train_val`, `get_training_pool`, `get_demo_holdout` in `services/ai/preprocessing.py`.
+2. **Class weights everywhere** — the dataset is unbalanced (3,000–4,200 rows per class): trees use `class_weight="balanced"`, XGBoost uses balanced `sample_weight`, torch models use class-weighted `CrossEntropyLoss`.
+3. **Early stopping** — LightGBM/XGBoost train up to 1000 rounds with 50-round early stopping on validation loss; torch models keep the best-validation-F1 epoch with patience; LSTM-AE remains capped at 20 epochs.
+4. **NaN robustness** — scaled models wrap median imputation + `StandardScaler` in their pipeline; LightGBM/XGBoost stay unscaled and consume NaN natively.
+5. **Per-family scalers** — each family directory gets its own `scaler.pkl`; `shared/scaler.pkl` is refreshed as a fallback.
+
+The run also writes `shared/leaderboard.json` (val/holdout metrics per family + the global winner), `shared/sanity_baselines.json` (ANOVA feature ranking + trivial-baseline scores), and the winner checkpoint `shared/model_best.pth` (currently the CNN). GPU is used automatically for the torch models if a CUDA-capable device is present.
+
+[`services/ai/dtxai_model_training.ipynb`](https://github.com/YKesX/DTX-AI/blob/main/services/ai/dtxai_model_training.ipynb) is a cell-for-cell mirror of the script and is **generated** from it by `scripts/gen_training_notebook.py` — regenerate it after changing the script; never hand-edit the notebook.

@@ -1,16 +1,11 @@
 {
   "model_name": "best_lstmae.pth",
   "model_family": "lstm_autoencoder_pytorch",
+  "trained_at": "2026-06-10T12:09:52+00:00",
   "trained_on_dataset": "dtx_ai_master_dataset.csv",
   "feature_count": 19,
   "num_classes": 6,
   "feature_order_ref": "services/ai/models/shared/feature_order.json",
-  "scaler_required": true,
-  "input_shape": {
-    "batch": "N",
-    "sequence_length": 1,
-    "feature_dim": 19
-  },
   "class_mapping": {
     "0": "nominal",
     "1": "bearing_wear",
@@ -19,28 +14,36 @@
     "4": "pressure_fault",
     "5": "wheel_slip"
   },
-  "training_split": "60/10/30",
+  "training_split": "episode-temporal 60/20/20 (train/val/demo-holdout), purge gap 60 rows",
   "best_params": {
-    "epochs": 20,
-    "hidden": 64,
+    "hidden": 32,
     "latent": 16,
-    "lr": 0.01,
+    "lr": 0.001,
+    "epochs": 17,
+    "max_epochs": 20,
     "batch": 64,
     "lambda_recon": 1.0,
     "lambda_cls": 1.0,
     "dropout": 0.2,
     "weight_decay": 0.0001
   },
+  "leakage_controls": "per-episode temporal split with purge gap; demo holdout is the future tail of every fault run and is never used in training",
+  "scaler_required": true,
+  "scaler_path": "services/ai/models/lstm_ae/scaler.pkl",
+  "input_shape": {
+    "batch": "N",
+    "sequence_length": 1,
+    "feature_dim": 19
+  },
   "metrics": {
-    "val_accuracy": 0.611111,
-    "val_f1": 0.594971,
-    "val_precision": 0.859684,
-    "test_accuracy": 0.610586,
-    "test_f1": 0.591437,
-    "test_precision": 0.856637,
-    "test_reconstruction_mse": 16.761198
+    "val_accuracy": 0.996478,
+    "val_f1": 0.996682,
+    "val_precision": 0.996706,
+    "test_accuracy": 0.996632,
+    "test_f1": 0.996684,
+    "test_precision": 0.996587,
+    "test_reconstruction_mse": 0.045763
   },
   "decision_type": "multiclass_classifier_with_reconstruction",
-  "default_threshold": 0.5,
-  "notes": "Trained via scripts/train_models.py \u2014 exact mirror of dtxai_model_training.ipynb cell 8. Architecture is ai.lstm_classifier.LSTMAutoencoderClassifier."
+  "default_threshold": 0.5
 }

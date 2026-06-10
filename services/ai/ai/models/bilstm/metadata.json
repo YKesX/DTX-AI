@@ -1,22 +1,41 @@
 {
   "model_name": "best_bilstm.pth",
   "model_family": "bilstm_pytorch",
+  "trained_at": "2026-06-10T12:09:08+00:00",
+  "trained_on_dataset": "dtx_ai_master_dataset.csv",
   "feature_count": 19,
   "num_classes": 6,
-  "scaler_required": true,
-  "training_split": "80/10/10",
+  "feature_order_ref": "services/ai/models/shared/feature_order.json",
+  "class_mapping": {
+    "0": "nominal",
+    "1": "bearing_wear",
+    "2": "overheat",
+    "3": "overload",
+    "4": "pressure_fault",
+    "5": "wheel_slip"
+  },
+  "training_split": "episode-temporal 60/20/20 (train/val/demo-holdout), purge gap 60 rows",
   "best_params": {
-    "epochs": 100,
     "hidden_dim": 64,
-    "num_layers": 2,
-    "lr": 0.01,
+    "num_layers": 1,
+    "lr": 0.001,
+    "epochs": 3,
+    "max_epochs": 40,
     "dropout": 0.3,
     "window": 30
   },
+  "leakage_controls": "per-episode temporal split with purge gap; demo holdout is the future tail of every fault run and is never used in training",
+  "scaler_required": true,
+  "scaler_path": "services/ai/models/bilstm/scaler.pkl",
   "metrics": {
-    "val_f1": 0.734314,
-    "test_accuracy": 0.6053,
-    "test_f1": 0.611855,
-    "test_precision": 0.63274
-  }
+    "val_accuracy": 1.0,
+    "val_f1": 1.0,
+    "val_precision": 1.0,
+    "test_accuracy": 1.0,
+    "test_f1": 1.0,
+    "test_precision": 1.0
+  },
+  "decision_type": "multiclass_classifier",
+  "default_threshold": 0.5,
+  "supports_tree_xai": false
 }

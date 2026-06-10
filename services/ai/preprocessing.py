@@ -24,7 +24,6 @@ import threading
 import joblib
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 
 # Canonical class order — also the int code each label maps to via LABEL_TO_INT.
 # Position 0 is the "no anomaly" baseline so runtime code can treat class 0 as
@@ -65,12 +64,16 @@ FEATURES = [
     "temperature_c",
 ]
 
-# Demo holdout. A fixed 20% stratified row-level slice is useful for readable
-# dashboard demos because small samples cover the full class vocabulary. When
-# a dataset provides real episode/run identifiers, training can use
-# ``split_episode_pool_and_holdout`` for a stricter grouped holdout instead.
+# Demo holdout. The dataset is ~60 Hz telemetry, so neighbouring rows are
+# near-duplicates: a row-level random holdout leaks training data into the
+# demo. The canonical holdout is therefore TEMPORAL PER EPISODE — the last
+# ``HOLDOUT_RATIO`` of every contiguous fault run — with ``PURGE_GAP_ROWS``
+# rows dropped between pool and holdout so no demo frame is adjacent to (or
+# shares a sliding window with) any training frame.
 HOLDOUT_RATIO = 0.2
 HOLDOUT_RANDOM_STATE = 42
+# >= 2x the CNN/Bi-LSTM window (30) so no window can straddle the boundary.
+PURGE_GAP_ROWS = 60
 
 # Preferred group identifiers for honest episode-level splits. The fixed
 # dataset should include one of these columns; until then we derive a stable
@@ -123,22 +126,67 @@ def load_data(file_name: str = "dtx_ai_master_dataset.csv") -> pd.DataFrame:
     return df
 
 
-def split_training_pool_and_holdout(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split the full dataset into an 80% pool and a 20% row-level demo holdout.
+def _per_episode_temporal_tail_split(
+    df: pd.DataFrame,
+    tail_ratio: float,
+    gap_rows: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Within every episode/run, keep the head, drop a purge gap, hold the tail.
 
-    Stratified on ``fault_label`` with a fixed random seed so the split is
-    identical for every caller. The pool index order is preserved for
-    reproducibility.
+    This is the leakage-safe primitive behind the canonical demo holdout and
+    the train/val split: head and tail of the same run never share adjacent
+    frames, and every fault class appears on both sides because every run
+    contributes a head and a tail.
     """
-    train_idx, holdout_idx = train_test_split(
-        df.index,
-        test_size=HOLDOUT_RATIO,
-        random_state=HOLDOUT_RANDOM_STATE,
-        stratify=df["fault_label"],
-    )
-    training_pool = df.loc[sorted(train_idx)].reset_index(drop=True)
-    holdout = df.loc[sorted(holdout_idx)].reset_index(drop=True)
-    return training_pool, holdout
+    work = df.reset_index(drop=True)
+    groups = episode_groups(work)
+    head_parts: list[pd.DataFrame] = []
+    tail_parts: list[pd.DataFrame] = []
+    for _, seg_idx in groups.groupby(groups, sort=False).groups.items():
+        seg = work.loc[list(seg_idx)]
+        n = len(seg)
+        n_tail = int(round(n * tail_ratio))
+        if n_tail == 0:
+            head_parts.append(seg)
+            continue
+        gap = min(gap_rows, max(n - n_tail - 1, 0))
+        n_head = n - n_tail - gap
+        if n_head > 0:
+            head_parts.append(seg.iloc[:n_head])
+        tail_parts.append(seg.iloc[n - n_tail:])
+    head = pd.concat(head_parts).reset_index(drop=True) if head_parts else work.iloc[0:0].copy()
+    tail = pd.concat(tail_parts).reset_index(drop=True) if tail_parts else work.iloc[0:0].copy()
+    return head, tail
+
+
+def split_demo_pool_and_holdout(
+    df: pd.DataFrame,
+    holdout_ratio: float = HOLDOUT_RATIO,
+    gap_rows: int = PURGE_GAP_ROWS,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Canonical leakage-safe split: per-episode temporal tail demo holdout.
+
+    For each of the contiguous fault runs, the last ``holdout_ratio`` of rows
+    becomes demo holdout, ``gap_rows`` rows immediately before it are dropped
+    entirely (purge gap), and the rest is the training pool. The demo replays
+    the *future* of every fault episode the models trained on the *past* of —
+    no shared or adjacent frames, all 6 classes present on both sides.
+    """
+    return _per_episode_temporal_tail_split(df, holdout_ratio, gap_rows)
+
+
+def split_pool_train_val(
+    pool: pd.DataFrame,
+    val_ratio: float = 0.25,
+    gap_rows: int = PURGE_GAP_ROWS,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Leakage-safe train/val split *inside* the training pool.
+
+    Same per-episode temporal mechanics as the demo holdout, so validation
+    F1 scores are comparable across hyperparameter configs (single fixed
+    split) and never inflated by adjacent-frame leakage.
+    """
+    return _per_episode_temporal_tail_split(pool, val_ratio, gap_rows)
 
 
 def find_episode_column(df: pd.DataFrame) -> str | None:
@@ -233,13 +281,14 @@ def split_temporal_pool_and_holdout(
 
 
 def get_training_pool(df: pd.DataFrame) -> pd.DataFrame:
-    """Convenience: return only the 80% training pool."""
-    return split_training_pool_and_holdout(df)[0]
+    """Convenience: return only the training pool (past of every episode)."""
+    return split_demo_pool_and_holdout(df)[0]
 
 
 def get_demo_holdout(df: pd.DataFrame) -> pd.DataFrame:
-    """Convenience: return only the 20% demo holdout the models never see."""
-    return split_training_pool_and_holdout(df)[1]
+    """Convenience: return only the demo holdout the models never see
+    (future tail of every episode, separated by a purge gap)."""
+    return split_demo_pool_and_holdout(df)[1]
 
 
 def engineer_features(df: pd.DataFrame, window: int = 0, step: int = 0):
@@ -281,21 +330,6 @@ def engineer_features(df: pd.DataFrame, window: int = 0, step: int = 0):
     return np.array(windows_X), np.array(windows_y)
 
 
-def split_and_scale(df: pd.DataFrame):
-    """Stratified 80/20 split, scaler fit on train only — no leakage."""
-    X = df[FEATURES]
-    y = df["fault_label"]
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y,
-    )
-    scaler = StandardScaler().fit(X_train)
-    X_train_s = pd.DataFrame(scaler.transform(X_train), columns=FEATURES, index=X_train.index)
-    X_test_s = pd.DataFrame(scaler.transform(X_test), columns=FEATURES, index=X_test.index)
-    joblib.dump(scaler, "scaler.pkl")
-    return X_train_s, X_test_s, y_train, y_test
-
-
 def preprocess_single(
     raw_input: dict,
     scaler_path: str = "scaler.pkl",
@@ -320,19 +354,9 @@ def preprocess_single(
     return scaler.transform(row)
 
 
-def run_preprocessing():
-    """CLI helper: load + scale + dump to CSV for the notebook."""
-    print("Loading data...")
-    df = load_data()
-    print(f"Loaded {df.shape}, classes: {df['fault_label_name'].value_counts().to_dict()}")
-    X_train, X_test, y_train, y_test = split_and_scale(df)
-    X_train.to_csv("X_train.csv", index=False)
-    X_test.to_csv("X_test.csv", index=False)
-    y_train.to_csv("y_train.csv", index=False)
-    y_test.to_csv("y_test.csv", index=False)
-    print(f"  X_train: {X_train.shape}")
-    print(f"  X_test:  {X_test.shape}")
-
-
 if __name__ == "__main__":
-    run_preprocessing()
+    frame = load_data()
+    pool, holdout = split_demo_pool_and_holdout(frame)
+    print(f"Loaded {frame.shape}, classes: {frame['fault_label_name'].value_counts().to_dict()}")
+    print(f"training pool: {pool.shape}  demo holdout: {holdout.shape}")
+    print(f"holdout classes: {holdout['fault_label_name'].value_counts().to_dict()}")

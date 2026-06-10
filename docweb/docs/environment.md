@@ -18,12 +18,13 @@ Create `apps/api/.env` (copy from `.env.example`):
 | `ANOMALY_THRESHOLD` | `0.5` | No | Minimum class-confidence to flag an anomaly |
 | `AI_DEBUG` | `false` | No | Verbose AI logging |
 | `CORS_ORIGINS` | `http://localhost:5173,http://localhost:3000` | No | ⚠️ Currently unused — `main.py` hardcodes `allow_origins=["*"]` |
+| `DTX_DEMO_LOG` | `/tmp/dtx_demo_runner.log` | No | Log file for the `/demo` subprocess runner (tail surfaced in `GET /demo/status`) |
 
 Runtime model selection (read by `services/ai/ai/detector.py`):
 
 | Variable | Default | Description |
 |---|---|---|
-| `DTX_ACTIVE_MODEL` | from `model_registry.json` `active_model` | One of `lightgbm`, `xgboost`, `random_forest`, `lstm_ae` |
+| `DTX_ACTIVE_MODEL` | from `model_registry.json` `active_model` | One of `random_forest`, `lightgbm`, `xgboost`, `tabnet`, `cnn`, `bilstm`, `lstm_ae` |
 | `DTX_REPLAY_STRICT` | `0` | `1` = disable all fallbacks; selected model must load |
 | `DTX_FORCE_STUB` | `0` | `1` = always use the rule-based stub (used by smoke tests) |
 
@@ -73,7 +74,7 @@ DTX_ACTIVE_MODEL=xgboost uvicorn main:app --reload --port 8000
 Or per-request via the event payload:
 
 ```json
-{ "asset_id": "...", "zone_id": "...", "metadata": { "active_model": "lstm_ae" } }
+{ "asset_id": "...", "zone_id": "...", "metadata": { "active_model": "cnn" } }
 ```
 
 The loader caches per-process on first call, so switching mid-process via `model_registry.json` requires restarting the API.

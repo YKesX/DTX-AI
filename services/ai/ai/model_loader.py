@@ -257,12 +257,20 @@ def load_runtime_model(
                 model = joblib.load(model_path)
 
             scaler_required = bool(metadata.get("scaler_required", True))
+            # Prefer the scaler trained alongside this family (saved next to
+            # the model artifact by scripts/train_models.py); the shared
+            # scaler is only a fallback so one family's scaler is never
+            # silently applied to another family's inputs.
+            family_scaler = None
+            family_scaler_path = model_path.parent / "scaler.pkl"
+            if scaler_required and family_scaler_path.exists():
+                family_scaler = joblib.load(family_scaler_path)
             runtime = RuntimeModel(
                 key=model_key,
                 family=family,
                 model=model,
                 metadata=metadata,
-                scaler=scaler if scaler_required else None,
+                scaler=(family_scaler or scaler) if scaler_required else None,
                 feature_order=feature_order,
                 supports_tree_xai=bool(cfg.get("supports_tree_xai", False)),
                 available=True,

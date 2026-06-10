@@ -8,17 +8,24 @@ sidebar_position: 13
 
 ## Dataset
 
-The training dataset is now produced by Isaac Sim and uses 19 sensor channels, but the F1 ≈ 1.0 result on a held-out 20% test split is still suspicious. Concretely:
+### FIXED: row-level split leakage
+
+The old demo holdout was a **row-level stratified 20% split**. At ~60 Hz, neighbouring rows are near-duplicates, so the demo effectively replayed training data. This is fixed: the canonical split is now **per-episode temporal** — the demo holdout is the last 20% of every contiguous fault run, with a 60-row purge gap (`PURGE_GAP_ROWS`, ~1.02 s minimum separation) dropped between pool and holdout, and train/val inside the pool uses the same mechanics (75/25). All 7 model families were retrained on this split, and `--split holdout` in the replay tooling now serves the leakage-safe holdout by default.
+
+### Still open: the dataset is too separable
+
+:::caution
+Near-perfect scores are now a **dataset property, not leakage**: a LightGBM trained on just the top-3 ANOVA features reaches macro F1 **0.994** on the honest demo holdout (see `shared/sanity_baselines.json`). The Isaac Sim team still needs to produce noisier, harder data.
+:::
 
 | Issue | Detail |
 |---|---|
-| **Rows sorted by label** | `fault_label` lives in long contiguous runs. Row-level random splits can place adjacent frames in train and test. Use `--split episode_holdout` for grouped validation or `--split temporal` for chronological drift checks. |
-| **Per-class signatures barely overlap** | A 3-deep decision stump on `(power_dissipated_w, pseudo_pressure_pa, roller_fl_velocity)` already separates most pairs. The classifier isn't really doing hard work yet. |
+| **Per-class signatures barely overlap** | The top-3 ANOVA features alone separate the classes almost perfectly. The classifier isn't really doing hard work yet. |
 | **No fault precursors** | The CSV jumps directly from `nominal` to a steady fault state with no transition region. The model never sees ambiguous near-boundary events. |
 | **No mixed faults** | There is no `wheel_slip + overheat` regime. Compound faults will collapse to whichever class is closest. |
-| **No environmental noise** | Vibration magnitude is essentially constant in the CSV. The model has not learned to ignore noise. |
+| **Limited environmental noise** | Aside from ~100 NaN sensor dropouts per channel, the channels are far cleaner than real telemetry. The model has not learned to ignore a realistic noise floor. |
 
-The full breakdown and the four concrete things the Isaac Sim team can do to fix this lives in [docs/isaac_sim_integration.md §3–4](https://github.com/YKesX/DTX-AI/blob/main/docs/isaac_sim_integration.md).
+The full breakdown and the concrete things the Isaac Sim team can do to fix this lives in [docs/isaac_sim_integration.md §3–4](https://github.com/YKesX/DTX-AI/blob/main/docs/isaac_sim_integration.md).
 
 ---
 
@@ -29,7 +36,7 @@ The full breakdown and the four concrete things the Isaac Sim team can do to fix
 | **`/events` page** | Placeholder div — "Events page coming soon..." (`App.jsx`) |
 | **`/settings` page** | Placeholder div — "Settings page coming soon..." (`App.jsx`) |
 | **Isaac Sim integration** | `apps/sim/sim/scene.py` and `apps/sim/sim/hooks.py` are logging stubs — no real USD / Omniverse calls |
-| **LSTM-AE SHAP** | `supports_tree_xai: false` — explanation degrades to a generic per-class summary string; no per-feature attribution. Adding `shap.DeepExplainer` is open |
+| **Deep-model SHAP** | TabNet, CNN, Bi-LSTM and LSTM-AE all have `supports_tree_xai: false` — explanation degrades to a generic per-class summary string; no per-feature attribution. Adding `shap.DeepExplainer` is open |
 | **SHAP not persisted** | `contributing_features` are lost after WebSocket broadcast — `GET /alerts/` returns alerts without them |
 | **CORS config unused** | `api/config.py` defines `cors_origins` but `main.py` hardcodes `allow_origins=["*"]` |
 | **PyTorch outside the requirements file** | `torch` is intentionally documented as a separate `pip install` step in `services/ai/requirements.txt` because PyPI's torch wheel doesn't always ship CUDA support — must come from the official index URL |

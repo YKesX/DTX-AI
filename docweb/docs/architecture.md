@@ -10,10 +10,12 @@ sidebar_position: 2
 
 The system follows a **synchronous request-driven pipeline** with a WebSocket broadcast layer.
 
-1. A client (dataset replayer or Isaac Sim adapter) sends a 19-channel sensor frame to FastAPI via `POST /events/`
+1. A client (dataset replayer, the ESP32 hardware bridge, or Isaac Sim adapter) sends a 19-channel sensor frame to FastAPI via `POST /events/`
 2. The backend calls the AI service pipeline **in-process** (via Python import) — anomaly detection + SHAP explanation
 3. Results are persisted to SQLite, broadcast over WebSocket to all dashboard clients, and forwarded to the Isaac Sim adapter (fire-and-forget)
 4. The React dashboard receives events via WebSocket and allows operators to take workflow actions
+
+The hardware demo follows the exact same path: the ESP32 node (`HW/`, DS18B20 + BMP280) serves live readings over HTTP, `scripts/hw_demo_bridge.py` polls it and POSTs full 19-channel frames into `POST /events/` — see the [Hardware Demo](/docs/hardware-demo) page.
 
 ---
 
@@ -24,7 +26,8 @@ The system follows a **synchronous request-driven pipeline** with a WebSocket br
 │  Data Sources                                                    │
 │  scripts/replay_dataset_demo.py ──► POST /events/  (HTTP)        │
 │  Isaac Sim adapter (you write)   ──► POST /events/  (HTTP)       │
-│  [future] ESP32 / hardware       ──► POST /events/  (HTTP)       │
+│  HW/ ESP32 node (DS18B20+BMP280) ──► scripts/hw_demo_bridge.py   │
+│                                      ──► POST /events/  (HTTP)   │
 └──────────────────────────────┬───────────────────────────────────┘
                                │ HTTP :8000
 ┌──────────────────────────────▼───────────────────────────────────┐
@@ -36,6 +39,7 @@ The system follows a **synchronous request-driven pipeline** with a WebSocket br
 │  DELETE /alerts/clear ──► SQLite + live_metrics reset           │
 │  GET  /assets/{id}/timeline ──► SQLite                          │
 │  GET  /metrics/live ──► LiveReplayMetrics (in-memory)           │
+│  /demo/*            ──► spawns replay / hardware-bridge process │
 │  WS   /ws/events    ──► ConnectionManager (broadcast)           │
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────────┐   │
@@ -58,6 +62,7 @@ The system follows a **synchronous request-driven pipeline** with a WebSocket br
 │  GET /metrics/live → polled every 2s (Dashboard), 4s (Validation)│
 │  GET /assets/{id}/timeline → on event select                     │
 │  GET/POST /alerts/{id}/actions → operator workflow               │
+│  /demo/* → Demo Control panel (start/stop dataset or IRL demo)   │
 └──────────────────────────────────────────────────────────────────┘
            │
            ▼ (future — currently stub only)
@@ -80,7 +85,8 @@ The system follows a **synchronous request-driven pipeline** with a WebSocket br
 | ML — trees | LightGBM | 4.6.0 | Multi-class fault classification |
 | ML — trees | XGBoost | 3.2.0 | Multi-class fault classification |
 | ML — trees | scikit-learn RF | 1.8.0 | Multi-class fault classification |
-| ML — deep | PyTorch (+CUDA) | 2.11.0+cu128 | LSTM-AE + classifier head |
+| ML — deep | PyTorch (+CUDA) | 2.11.0+cu128 | CNN, Bi-LSTM, LSTM-AE + classifier head |
+| ML — deep | pytorch-tabnet | ≥ 4.1.0 | TabNet fault classifier |
 | XAI | SHAP | ≥ 0.45 | Feature attribution |
 | Data processing | pandas / numpy | 3.0.2 / 2.4.4 | Dataset I/O |
 | Frontend | React | 18.3.1 | UI |

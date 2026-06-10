@@ -1,53 +1,24 @@
 """SHAP-based XAI report builder for the tree-model runtime path."""
 
+import sys
+from pathlib import Path
 from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
 import shap
 
-# FEATURES must match preprocessing.FEATURES one-for-one — the runtime
-# explainer aligns SHAP outputs to this order positionally.
-FEATURES = [
-    "imu_lin_acc_x",
-    "imu_lin_acc_y",
-    "imu_lin_acc_z",
-    "imu_ang_vel_x",
-    "imu_ang_vel_y",
-    "imu_ang_vel_z",
-    "vibration_magnitude",
-    "lift_joint_position",
-    "lift_force_z",
-    "pseudo_pressure_pa",
-    "drive_joint_velocity",
-    "drive_joint_effort",
-    "lift_joint_velocity",
-    "roller_fl_velocity",
-    "roller_fr_velocity",
-    "roller_bl_velocity",
-    "roller_br_velocity",
-    "power_dissipated_w",
-    "temperature_c",
-]
+# preprocessing.py owns FEATURES and CLASS_NAMES — single source of truth.
+_SERVICES_AI_ROOT = Path(__file__).resolve().parents[1]
+if str(_SERVICES_AI_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SERVICES_AI_ROOT))
+from preprocessing import CLASS_NAMES, FEATURES  # noqa: E402
 
-# Canonical class string → SHAP class index. Order matches
-# preprocessing.CLASS_NAMES so model output and explainer agree.
-CLASS_INDEX_MAP = {
-    "nominal": 0,
-    "bearing_wear": 1,
-    "overheat": 2,
-    "overload": 3,
-    "pressure_fault": 4,
-    "wheel_slip": 5,
-}
+# Canonical class string → SHAP class index.
+CLASS_INDEX_MAP = {name: idx for idx, name in enumerate(CLASS_NAMES)}
 
 CLASS_DISPLAY_MAP = {
-    "nominal": "Nominal",
-    "bearing_wear": "Bearing Wear",
-    "overheat": "Overheat",
-    "overload": "Overload",
-    "pressure_fault": "Pressure Fault",
-    "wheel_slip": "Wheel Slip",
+    name: name.replace("_", " ").title() for name in CLASS_NAMES
 }
 
 # Human-readable feature names for the operator-facing summary text.

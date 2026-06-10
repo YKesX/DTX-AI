@@ -106,32 +106,43 @@ Gaussian on every channel at ~1 % of nominal range, occasional sensor
 dropouts published as `null`, gradual ramps over 30–120 s rather than step
 changes).
 
-Cadence: 1 Hz is plenty. The runtime classifier scores single events
-independently; there is no sequence-length requirement.
+Cadence: 1 Hz is plenty for the per-event models (trees, TabNet, LSTM-AE),
+which score single events independently. The windowed models (CNN, Bi-LSTM)
+buffer 30 consecutive events before inference and fall back to rules until
+the buffer fills, so a steady stream from one asset is needed for them.
 
 ---
 
 ## 3. What is still wrong with the dataset
 
 The new dataset is a clear improvement over the previous toy CSV — it uses
-real Isaac-Sim-style channels and real fault physics — but the models still
-score F1 ≈ 1.0 on a held-out 20 % test split. That number is suspicious for
-the same reasons as before. Concretely:
+real Isaac-Sim-style channels and real fault physics, runs at ~60 Hz across
+22 270 rows in 13 contiguous fault runs, and includes real sensor dropouts
+(~100 NaNs per channel). The split-leakage problem on the consumer side is
+**fixed**: training and evaluation now use a per-episode temporal split —
+the demo holdout is the last 20 % of every contiguous fault run, with a
+60-row purge gap dropped between pool and holdout (see
+`services/ai/preprocessing.py:split_demo_pool_and_holdout`).
 
-### 3.1 Rows are still sorted by label
+Even on that honest holdout, though, the models score macro F1 ≈ 0.99–1.0.
+That is now a **dataset property, not leakage** — and it means the data is
+still too easy. Concretely:
 
-`fault_label` lives in 6 contiguous 1 800-row blocks across `timestamp_s`.
-A random `train_test_split` consequently sees adjacent rows in train and
-test, which leaks per-class behaviour. Use the chronological split
-(`scripts/replay_dataset_demo.py:chronological_split`) for honest evaluation;
-the training script intentionally mirrors the notebook's stratified-random
-split so the numbers match the notebook one-for-one.
+### 3.1 Fault runs are long, clean, and internally homogeneous
+
+`fault_label` lives in 13 contiguous runs across `timestamp_s` (3 000–4 200
+rows per class). Within a run the signal barely changes, so even an honest
+temporal holdout sits squarely inside each class's envelope. The old
+row-level stratified split (and the removed `chronological_split` helper)
+are gone; `--split holdout` in `scripts/replay_dataset_demo.py` now serves
+the purge-gapped per-episode temporal tail.
 
 ### 3.2 Per-class signatures barely overlap
 
 The means listed in §2 are far apart relative to the within-class variance.
-A 3-deep decision stump on `(power_dissipated_w, pseudo_pressure_pa,
-roller_fl_velocity)` already separates most pairs. The classifier isn't
+A LightGBM trained on just the top-3 ANOVA features reaches macro F1 0.994
+on the honest holdout (see
+`services/ai/ai/models/shared/sanity_baselines.json`). The classifier isn't
 really doing hard work yet.
 
 ### 3.3 No fault precursors
@@ -149,11 +160,11 @@ simulates compound faults the model will collapse to whichever class is
 closest and report it with high confidence; this is a known limitation of
 single-label multiclass and is not a bug.
 
-### 3.5 No environmental noise
+### 3.5 Not enough environmental noise
 
-Vibration magnitude in the CSV is essentially constant (~9.81 ≈ g, since the
-asset is at rest under gravity). Real telemetry has a noise floor; the model
-has not learned to ignore it.
+The dataset now contains NaN sensor dropouts, which is a start, but the
+channels themselves are far cleaner than real telemetry — there is no
+realistic noise floor for the model to learn to ignore.
 
 ---
 
@@ -163,17 +174,19 @@ has not learned to ignore it.
 
 1. **Add small Gaussian noise to every channel** (σ ≈ 1 % of nominal range)
    plus rare 5–10 σ outliers (~0.5 % of ticks) to teach the model to ignore
-   sensor noise vs sustain. The current zero-variance vibration column is
-   the obvious tell.
+   sensor noise vs sustain. NaN dropouts are now in the data; a continuous
+   noise floor is the missing piece.
 2. **Insert ramp-up and ramp-down regions between faults** so train and test
-   see ambiguous near-boundary events. Without these the F1=1.0 result is
-   meaningless.
+   see ambiguous near-boundary events. Without these, near-perfect F1 on the
+   honest holdout tells us little.
 3. **Simulate at least one compound fault scenario** even if only as a
    diagnostic — overheat + bearing_wear is a natural pair (an overheating
    bearing accelerates wear).
-4. **Re-train with a chronological split** rather than the notebook's
-   stratified-random one. Drop F1 to whatever it actually is. If it drops
-   below 0.9, you finally have a model worth tuning.
+4. ~~Re-train with a chronological split~~ — **done on the consumer side**:
+   training and evaluation now use the per-episode temporal split with a
+   60-row purge gap. The remaining work is making the data hard enough that
+   the honest holdout F1 drops below ~0.99; if it drops below 0.9, you
+   finally have a model worth tuning.
 5. **Optionally re-include `Zone` or an equivalent categorical** if your
    sim emits one — the current FEATURES list is purely numeric, but
    per-zone behaviour could be informative.

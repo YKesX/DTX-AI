@@ -3,9 +3,10 @@
 #
 # The legacy hand-crafted "synthetic" scenario seeder was removed when the
 # dataset switched to the Isaac-Sim 19-channel telemetry schema. Use the
-# replay path (which streams real rows from the held-out chronological tail
-# of services/ai/dtx_ai_master_dataset.csv) or wire your own Isaac Sim
-# adapter directly to POST /events/.
+# replay path (default split "holdout" streams the leakage-safe per-episode
+# temporal tail of services/ai/dtx_ai_master_dataset.csv that no model ever
+# trained on), the IRL hardware bridge (scripts/hw_demo_bridge.py), or wire
+# your own Isaac Sim adapter directly to POST /events/.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

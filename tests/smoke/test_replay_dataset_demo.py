@@ -11,14 +11,39 @@ assert spec and spec.loader
 spec.loader.exec_module(replay)
 
 
-def test_chronological_split_helper_still_works():
-    """Kept around as a backwards-compat shim — the demo no longer uses it."""
-    df = pd.DataFrame({"timestamp_s": [float(i) for i in range(10)]})
-    splits = replay.chronological_split(df, test_ratio=0.2)
-    assert len(splits["train"]) == 8
-    assert len(splits["test"]) == 2
-    assert splits["train"]["timestamp_s"].is_monotonic_increasing
-    assert splits["test"]["timestamp_s"].is_monotonic_increasing
+def test_holdout_never_overlaps_training_pool():
+    """The canonical demo holdout must share zero rows with the training
+    pool, and within every episode the closest pool frame must be at least
+    one purge gap away — this is the data-leakage regression guard."""
+    import sys
+    ai_root = Path(__file__).resolve().parents[2] / "services" / "ai"
+    if str(ai_root) not in sys.path:
+        sys.path.insert(0, str(ai_root))
+    from preprocessing import (
+        PURGE_GAP_ROWS,
+        episode_groups,
+        load_data,
+        split_demo_pool_and_holdout,
+    )
+
+    df = load_data(str(ai_root / "dtx_ai_master_dataset.csv"))
+    pool, holdout = split_demo_pool_and_holdout(df)
+
+    pool_ts = set(pool["timestamp_s"])
+    holdout_ts = set(holdout["timestamp_s"])
+    assert not pool_ts & holdout_ts, "pool and holdout share rows"
+
+    # Median sample period — the purge gap must hold in time units too.
+    dt = float(df["timestamp_s"].diff().median())
+    work = df.copy()
+    work["_g"] = episode_groups(df).values
+    for _, seg in work.groupby("_g"):
+        last_pool = seg[seg["timestamp_s"].isin(pool_ts)]["timestamp_s"].max()
+        first_holdout = seg[seg["timestamp_s"].isin(holdout_ts)]["timestamp_s"].min()
+        if pd.notna(last_pool) and pd.notna(first_holdout):
+            assert first_holdout - last_pool >= PURGE_GAP_ROWS * dt * 0.9, (
+                f"purge gap violated: {first_holdout - last_pool:.3f}s"
+            )
 
 
 def test_build_event_payload_contains_replay_metadata():

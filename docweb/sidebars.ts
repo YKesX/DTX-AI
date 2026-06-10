@@ -33,6 +33,12 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Hardware',
+      collapsed: false,
+      items: ['hardware-demo'],
+    },
+    {
+      type: 'category',
       label: 'Operations',
       collapsed: false,
       items: ['environment', 'setup', 'deployment'],

@@ -13,8 +13,11 @@ sidebar_position: 14
 | **SHAP** | SHapley Additive exPlanations — game-theory-based method assigning each input feature a contribution score for a specific prediction |
 | **TreeExplainer** | SHAP explainer optimised for tree-based models (Random Forest, LightGBM, XGBoost) |
 | **Feature Attribution** | The contribution score assigned to each input channel explaining why a model made a particular prediction |
-| **Anomaly Score** | Normalised float `[0.0..1.0]` representing model confidence in its predicted class. For tree models it is `max(predict_proba)` over the non-nominal classes; for the LSTM-AE+CLS it is the softmax probability of the argmax class |
-| **Dataset Replay Mode** | Validation mode where held-out dataset rows are replayed through the live API with ground-truth labels for real-time accuracy tracking |
+| **Anomaly Score** | Normalised float `[0.0..1.0]` representing model confidence in its predicted class. For tree models and TabNet it is `max(predict_proba)` over the non-nominal classes; for the torch models it is the softmax probability of the argmax class |
+| **Dataset Replay Mode** | Validation mode where demo-holdout rows are replayed through the live API with ground-truth labels for real-time accuracy tracking |
+| **Demo Holdout** | The canonical leakage-safe evaluation slice: the last 20% of every contiguous fault run (per-episode temporal split), never seen during training. Served by `--split holdout` and used for all reported holdout metrics |
+| **Purge Gap** | `PURGE_GAP_ROWS` (60 rows, ~1.02 s at 60 Hz) dropped between the training pool and the demo holdout so no held-out frame is adjacent to — or shares a sliding window with — a training frame |
+| **Hardware Demo** | IRL demo mode: an ESP32 node (`HW/`, DS18B20 + BMP280) streams live readings via `scripts/hw_demo_bridge.py` into `POST /events/` with `metadata.source = "hardware_demo"` |
 | **Strict Replay Mode** | `DTX_REPLAY_STRICT=1` — disables all fallbacks; the requested model and its class mapping must be available |
 | **Ground Truth Label** | The actual known fault class for a dataset row, compared against the model prediction to compute accuracy |
 | **Canonical Label** | Normalised string representation of a fault class (one of `nominal`, `bearing_wear`, `overheat`, `overload`, `pressure_fault`, `wheel_slip`) |
@@ -36,6 +39,8 @@ sidebar_position: 14
 | **Pressure Fault** | Class 4 — `pseudo_pressure_pa` deeply negative, `lift_force_z` inverted |
 | **Wheel Slip** | Class 5 — roller velocities desynchronised from drive joint, elevated temperature |
 | **LSTM-AE + CLS** | LSTM Autoencoder with a multi-class classification head on the latent vector. The encoder learns a latent representation, the decoder reconstructs the input (auxiliary loss), and the classifier head predicts the fault class |
+| **Windowed Model** | CNN and Bi-LSTM consume 30-step sliding windows built per-episode (windows never cross fault-run boundaries). At runtime the detector buffers 30 events before windowed inference and falls back to rules until the buffer fills |
+| **Leaderboard** | `shared/leaderboard.json` — validation and demo-holdout metrics for all 7 model families plus the global winner (selected on validation F1, ties broken deterministically) |
 | **Reconstruction MSE** | Mean squared error between the LSTM-AE input and its reconstructed output. Surfaced in `event.metadata.lstm_reconstruction_mse` for downstream monitoring; no longer used as the primary anomaly signal — class confidence is |
 | **View-model** | Normalised flat object shape produced by `normalizeAlert.js`, consumed by all dashboard React components |
 | **dtx-ai-shared** | The shared Pydantic v2 schema package installed as an editable pip package — single source of truth for inter-service contracts |

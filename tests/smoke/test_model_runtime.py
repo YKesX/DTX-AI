@@ -35,19 +35,20 @@ def test_explicit_model_selection_falls_back_when_missing_dependency(monkeypatch
     assert runtime.available is True or runtime.reason != ""
 
 
-# Profile near the bearing_wear class mean so the trained model sees an
-# in-distribution input; keeps these smoke tests stable across retrains.
+# Profile near the bearing_wear class median of the current dataset's
+# training pool so the trained model sees an in-distribution input; keeps
+# these smoke tests stable across retrains.
 _BEARING_WEAR_PROFILE = dict(
-    imu_lin_acc_x=-9.77, imu_lin_acc_y=0.0, imu_lin_acc_z=0.86,
-    imu_ang_vel_x=0.0, imu_ang_vel_y=0.0, imu_ang_vel_z=0.0,
-    vibration_magnitude=9.82,
-    lift_joint_position=-0.15, lift_force_z=-0.44, lift_joint_velocity=0.0,
-    pseudo_pressure_pa=-5.56,
-    drive_joint_velocity=0.0, drive_joint_effort=2812.0,
-    roller_fl_velocity=0.01, roller_fr_velocity=0.0,
-    roller_bl_velocity=0.01, roller_br_velocity=0.0,
-    power_dissipated_w=299.0,
-    temperature_c=27.2,
+    imu_lin_acc_x=-9.7725, imu_lin_acc_y=-0.0002, imu_lin_acc_z=0.8567,
+    imu_ang_vel_x=-0.0001, imu_ang_vel_y=0.0, imu_ang_vel_z=0.0,
+    vibration_magnitude=9.8101,
+    lift_joint_position=-0.091, lift_force_z=-743.1107, lift_joint_velocity=0.0743,
+    pseudo_pressure_pa=-9289.0132,
+    drive_joint_velocity=0.0132, drive_joint_effort=4669.3109,
+    roller_fl_velocity=0.0334, roller_fr_velocity=0.0071,
+    roller_bl_velocity=0.0416, roller_br_velocity=0.0249,
+    power_dissipated_w=1902.9497,
+    temperature_c=32.3956,
 )
 
 

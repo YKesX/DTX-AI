@@ -34,16 +34,18 @@ def _bearing_wear_event(**overrides):
     payload = {
         "asset_id": "test-forklift-01",
         "zone_id": "zone-A",
-        "imu_lin_acc_x": -9.77252, "imu_lin_acc_y": 0.00003, "imu_lin_acc_z": 0.856711,
-        "imu_ang_vel_x": 0.0, "imu_ang_vel_y": 0.0, "imu_ang_vel_z": 0.0,
-        "vibration_magnitude": 9.81,
-        "lift_joint_position": -0.045975, "lift_force_z": -738.923773, "lift_joint_velocity": 0.073892,
-        "pseudo_pressure_pa": -9236.5472,
-        "drive_joint_velocity": 0.010401, "drive_joint_effort": 3028.383545,
-        "roller_fl_velocity": 0.017542, "roller_fr_velocity": 0.029011,
-        "roller_bl_velocity": 0.017779, "roller_br_velocity": 0.017592,
-        "power_dissipated_w": 0.0,
-        "temperature_c": 25.5379,
+        # Per-channel medians of the bearing_wear class in the current
+        # dataset's training pool (services/ai/dtx_ai_master_dataset.csv).
+        "imu_lin_acc_x": -9.7725, "imu_lin_acc_y": -0.0002, "imu_lin_acc_z": 0.8567,
+        "imu_ang_vel_x": -0.0001, "imu_ang_vel_y": 0.0, "imu_ang_vel_z": 0.0,
+        "vibration_magnitude": 9.8101,
+        "lift_joint_position": -0.091, "lift_force_z": -743.1107, "lift_joint_velocity": 0.0743,
+        "pseudo_pressure_pa": -9289.0132,
+        "drive_joint_velocity": 0.0132, "drive_joint_effort": 4669.3109,
+        "roller_fl_velocity": 0.0334, "roller_fr_velocity": 0.0071,
+        "roller_bl_velocity": 0.0416, "roller_br_velocity": 0.0249,
+        "power_dissipated_w": 1902.9497,
+        "temperature_c": 32.3956,
     }
     payload.update(overrides)
     return payload

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Replay dataset rows through ``POST /events/`` for validation demos.
 
-Default ``--split holdout`` is the shuffled stratified demo holdout. Use
-``--split episode_holdout`` for grouped episode/run validation or
-``--split temporal`` for chronological tail checks.
+Default ``--split holdout`` is the canonical leakage-safe demo holdout: the
+future tail of every contiguous fault run, separated from the training pool
+by a purge gap, so no replayed frame was seen (or even neighboured) during
+training. Use ``--split episode_holdout`` for grouped episode/run validation
+or ``--split temporal`` for chronological tail checks.
 """
 
 from __future__ import annotations
@@ -61,10 +63,11 @@ def prepare_replay_rows(
 ) -> pd.DataFrame:
     """Pick the rows to replay through ``POST /events/``.
 
-    The default split is ``holdout`` — the canonical 20% shuffled demo slice
-    used for readable dashboard demos.
+    The default split is ``holdout`` — the canonical leakage-safe demo slice:
+    the future tail of every contiguous fault run, purge-gapped from the
+    training pool, so models never saw these frames (or their neighbours).
 
-    ``episode_holdout`` is the honest grouped split for validation: complete
+    ``episode_holdout`` is the grouped split for validation: complete
     episodes/runs are held out together. ``temporal`` is the chronological
     tail and is useful for drift checks.
 
@@ -99,19 +102,6 @@ def prepare_replay_rows(
     if limit is not None:
         split_df = split_df.iloc[: max(limit, 0)].copy()
     return split_df
-
-
-# Backwards-compat shim — kept so the smoke test can import the helper, but
-# no longer used by the demo itself. Callers should prefer
-# ``preprocessing.split_training_pool_and_holdout`` for the canonical split.
-def chronological_split(df: pd.DataFrame, test_ratio: float = 0.2) -> dict[str, pd.DataFrame]:
-    if df.empty:
-        return {"train": df.copy(), "test": df.copy(), "all": df.copy()}
-    split_idx = max(1, int(len(df) * (1.0 - test_ratio)))
-    split_idx = min(split_idx, len(df) - 1) if len(df) > 1 else 1
-    train = df.iloc[:split_idx].copy().reset_index(drop=True)
-    test = df.iloc[split_idx:].copy().reset_index(drop=True)
-    return {"train": train, "test": test, "all": df.copy().reset_index(drop=True)}
 
 
 def build_event_payload(

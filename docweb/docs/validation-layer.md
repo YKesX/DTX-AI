@@ -6,7 +6,7 @@ sidebar_position: 9
 
 # Validation Layer
 
-The repo ships with a **dataset replay validation mode** that proves trained models are driving outputs by replaying held-out rows of the Isaac-Sim-style training dataset and tracking ground-truth vs prediction accuracy in real time.
+The repo ships with two demo/validation modes: a **dataset replay mode** that proves trained models are driving outputs by replaying the leakage-safe demo holdout of the training dataset and tracking ground-truth vs prediction accuracy in real time, and a **hardware demo mode** that streams live ESP32 sensor readings through the same pipeline.
 
 ---
 
@@ -22,11 +22,13 @@ counters **without bypassing the real inference pipeline**.
 Replay events travel through the **identical code path** as Isaac Sim events. There is no separate mock inference path — this validates the full stack end-to-end.
 :::
 
+The default `holdout` split is **leakage-safe**: the dataset is ~60 Hz telemetry, so neighbouring rows are near-duplicates and a row-level random holdout would effectively replay training data. The demo holdout is instead the **last 20% of every contiguous fault run**, with a 60-row purge gap (~1.02 s minimum separation) dropped between the training pool and the holdout, so no replayed frame was seen — or is even adjacent to a frame seen — during training.
+
 ```bash
-# Pretty dashboard demo: shuffled stratified holdout
+# Dashboard demo: the leakage-safe per-episode temporal demo holdout (shuffled for display)
 python scripts/replay_dataset_demo.py --model lightgbm
 
-# Honest grouped validation: hold out complete episodes/runs
+# Grouped validation: hold out complete episodes/runs
 python scripts/replay_dataset_demo.py --model lightgbm --split episode_holdout
 
 # Drift check: chronological tail
@@ -41,6 +43,29 @@ Or the bundled orchestrator that also boots the API and dashboard:
 ```bash
 bash scripts/run_demo.sh --model lightgbm --count 200 --strict-replay
 ```
+
+---
+
+## Hardware Demo Mode (IRL / ESP32)
+
+The second demo mode streams **live sensor readings** from the ESP32 hardware node (`HW/` — DS18B20 temperature + BMP280 pressure) into the same `POST /events/` pipeline via `scripts/hw_demo_bridge.py`. The bridge uses the two real channels (`temperature_c`, `pseudo_pressure_pa` as a baseline-deviation × gain), derives `power_dissipated_w` from the temperature delta, and synthesizes the remaining 16 channels from nominal training-pool statistics. Hardware events carry `metadata.source = "hardware_demo"`, have no ground-truth labels, and therefore do not contribute to replay-accuracy metrics. See the [Hardware Demo guide](/docs/hardware-demo) for wiring, firmware, and bridge details.
+
+---
+
+## Demo Orchestration API & Dashboard Panel
+
+Both demo modes can be started from the dashboard. The AI Validation page has a **Demo Control** panel (`apps/dashboard/src/components/validation/DemoControlPanel.jsx`) that lets you choose **Dataset demo** vs **IRL demo (ESP32)**, pick the model, split, and event count, start/stop the run, and watch the demo log live.
+
+Under the hood it calls the `/demo` routes (`apps/api/api/routes/demo.py`), which spawn `scripts/replay_dataset_demo.py` or `scripts/hw_demo_bridge.py` as a subprocess — only one demo runs at a time:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /demo/models` | Enabled model registry keys for the selector |
+| `GET /demo/status` | `running`, `mode`, `params`, `started_at`, `returncode`, `log_tail` |
+| `POST /demo/start` | Start a dataset or hardware demo (409 if one is already running) |
+| `POST /demo/stop` | Terminate the running demo process |
+
+See the [API Reference](/docs/api-reference) for full request/response shapes.
 
 ---
 
@@ -81,10 +106,11 @@ The Validation page polls `GET /metrics/live` every 4 seconds and renders:
 
 | Component | What it shows |
 |---|---|
+| `DemoControlPanel` | Start/stop the dataset or IRL (ESP32) demo, choose model/split/count, live demo log |
 | `ReplaySummaryCards` | Total events / Correct predictions / Accuracy % |
 | `ClassDistributionCharts` | GT vs Predicted bar charts |
 | `ConfusionMatrix` | Dynamic table — cross-class prediction errors |
-| `ReplayEventTable` | Recent replay events with GT/prediction + correct/incorrect badge |
+| `ReplayEventTable` | Recent demo events with GT/prediction + correct/incorrect badge — includes both `dataset_replay` and `hardware_demo` sources |
 
 ---
 

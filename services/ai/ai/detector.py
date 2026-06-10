@@ -74,8 +74,16 @@ def reset_all_buffers() -> None:
 
 
 def _feature_vector(event: EventIn) -> list[float]:
-    """Extract the 19 sensor channels in canonical FEATURES order."""
-    return [float(getattr(event, name) or 0.0) for name in FEATURES]
+    """Extract the 19 sensor channels in canonical FEATURES order.
+
+    Missing sensors become NaN — scaled models impute medians inside their
+    pipeline and LightGBM/XGBoost consume NaN natively, exactly matching how
+    the models were trained on the dataset's real sensor dropouts.
+    """
+    return [
+        float(value) if (value := getattr(event, name)) is not None else float("nan")
+        for name in FEATURES
+    ]
 
 
 def _feature_columns(runtime: RuntimeModel, feature_count: int) -> list[str]:

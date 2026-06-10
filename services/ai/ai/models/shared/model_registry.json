@@ -10,7 +10,7 @@
       "family": "lightgbm",
       "path": "services/ai/models/lightgbm/best_lgbm.pkl",
       "metadata_path": "services/ai/models/lightgbm/metadata.json",
-      "requires_scaler": true,
+      "requires_scaler": false,
       "supports_tree_xai": true
     },
     "lstm_ae": {
@@ -34,7 +34,7 @@
       "family": "xgboost",
       "path": "services/ai/models/xgboost/best_xgb.pkl",
       "metadata_path": "services/ai/models/xgboost/metadata.json",
-      "requires_scaler": true,
+      "requires_scaler": false,
       "supports_tree_xai": true
     },
     "cnn": {

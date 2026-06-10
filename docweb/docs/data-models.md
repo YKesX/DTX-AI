@@ -44,7 +44,7 @@ Core input schema received at `POST /events/`. Every sensor channel is optional 
 | `asset_id` | `str` | **Yes** | Asset / forklift identifier |
 | `zone_id` | `str` | **Yes** | Warehouse zone identifier |
 | `timestamp` | `datetime` | No (auto-gen) | UTC event time |
-| `metadata` | `dict[str, Any]` | No (`{}`) | Arbitrary replay/source metadata |
+| `metadata` | `dict[str, Any]` | No (`{}`) | Arbitrary replay/source metadata — `metadata.source` is `dataset_replay`, `hardware_demo`, or `isaac_sim` depending on the producer |
 
 ### Sensor channels (all optional, all `float \| None`)
 
@@ -72,7 +72,7 @@ AI detection output.
 | Field | Type | Validation | Description |
 |---|---|---|---|
 | `event_id` | `UUID` | — | References `EventIn.event_id` |
-| `anomaly_score` | `float` | `0.0..1.0` | Model confidence — for trees this is `max(predict_proba)` over the non-nominal classes; for the LSTM-AE this is the softmax probability of the argmax class |
+| `anomaly_score` | `float` | `0.0..1.0` | Model confidence — for trees/TabNet this is `max(predict_proba)` over the non-nominal classes; for the torch models (CNN, Bi-LSTM, LSTM-AE) it is the softmax probability of the argmax class |
 | `is_anomaly` | `bool` | — | True when the predicted class is not `nominal` and score ≥ threshold |
 | `anomaly_type` | `AnomalyType` | — | Predicted fault class |
 | `severity` | `Severity` | — | INFO (nominal) / WARNING / CRITICAL |

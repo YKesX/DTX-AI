@@ -1,40 +1,38 @@
 #!/usr/bin/env python3
 """Retrain every model in services/ai/ai/models/ from scratch.
 
-Hyperparameter grids and split configurations track the original notebook:
+Methodology (mirrored cell-for-cell by services/ai/dtxai_model_training.ipynb):
 
-    SPLIT_CONFIGS       = (0.8/0.1/0.1), (0.7/0.2/0.1), (0.6/0.3/0.1),
-                          (0.7/0.1/0.2), (0.6/0.1/0.3)
-    N_ESTIMATORS_LIST   = [100, 200]
-    MAX_DEPTH_LIST      = [3, 5]
-    LEARNING_RATE_LIST  = [0.01, 0.1]
-    EPOCHS_LIST         = [10, 20, 50]
-    HIDDEN_DIM_LIST     = [32, 64]
-    LATENT_DIM_LIST     = [8, 16]
-    LSTM_LR_LIST        = [0.001, 0.01]
-
-For each model the (split × hyperparam) grid is swept and the best-F1 model is
-saved as best_<family>.pkl/.pth. Per-model best metadata is also saved.
-Splits are episode/group-aware when the dataset provides an episode/run column;
-otherwise the script derives conservative contiguous-run groups from labels.
-CNN/Bi-LSTM windows are created only after raw train/val/test group membership
-is fixed, so overlapping windows cannot cross split boundaries.
-
-After all sweeps, the overall best model (Global Winner) is selected.
-If the winner is a Tree/CNN/Bi-LSTM model, it is retrained on (train+val) 
-of its own best split and saved to services/ai/ai/models/shared/.
+    1. Canonical leakage-safe split — the dataset is ~60 Hz telemetry in 13
+       contiguous fault runs, so row-level random splits leak near-duplicate
+       neighbouring frames. Instead:
+           demo holdout = last 20% of every run  (purge gap 60 rows)
+           train / val  = first 75% / last 25% of the remaining pool
+                          (again per-run temporal, again purge-gapped)
+       Validation F1 is comparable across hyperparameter configs because the
+       split is FIXED; the demo holdout is touched exactly once per family,
+       for the final test report.
+    2. Class imbalance — every model trains class-weighted (the new dataset
+       is unbalanced: 3 000–4 200 rows per class).
+    3. Early stopping — boosted trees stop on validation loss; torch models
+       keep the best-validation-F1 epoch (LSTM-AE stays capped at 20 epochs).
+    4. NaN robustness — the dataset has real sensor dropouts. Scaled models
+       impute medians inside their pipeline; LightGBM/XGBoost consume NaN
+       natively and stay unscaled.
+    5. Per-family scalers — each family dir gets its own scaler.pkl so the
+       runtime never applies another model's scaler.
 
 This is the file the runtime registry actually reads.
-
-Tree models train on CPU in <1s each; LSTM-AE uses GPU when available.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 import sys
 import time
 import warnings
+from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
@@ -45,19 +43,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import f_classif
+from sklearn.impute import SimpleImputer
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
-    confusion_matrix,
     f1_score,
     precision_score,
     roc_auc_score,
 )
-from sklearn.impute import SimpleImputer
-from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.utils.class_weight import compute_class_weight
+from sklearn.utils.class_weight import compute_class_weight, compute_sample_weight
 from torch.utils.data import DataLoader, TensorDataset
 
 import lightgbm as lgb
@@ -79,13 +75,68 @@ sys.path.insert(0, str(AI_ROOT))
 from preprocessing import (  # noqa: E402
     CLASS_NAMES,
     FEATURES,
-    episode_groups,
+    PURGE_GAP_ROWS,
     engineer_features,
-    find_episode_column,
+    episode_groups,
     load_data,
-    split_episode_pool_and_holdout,
-    split_training_pool_and_holdout,
+    split_demo_pool_and_holdout,
+    split_pool_train_val,
 )
+from ai.lstm_classifier import LSTMAutoencoderClassifier  # noqa: E402
+from ai.cnn_classifier import CNNClassifier  # noqa: E402
+from ai.bilstm_classifier import BiLSTMClassifier  # noqa: E402
+
+# ── Notebook CELL 2: CONFIGURATION ─────────────────────────────────────────
+RANDOM_STATE = 42
+SPLIT_DESCRIPTION = (
+    f"episode-temporal 60/20/20 (train/val/demo-holdout), purge gap {PURGE_GAP_ROWS} rows"
+)
+
+RF_N_ESTIMATORS = [200, 400]
+RF_MAX_DEPTH = [8, 16, None]
+
+GBM_MAX_ROUNDS = 1000           # early stopping decides the real count
+GBM_EARLY_STOPPING = 50
+LGBM_LEARNING_RATE = [0.03, 0.1]
+LGBM_MAX_DEPTH = [-1, 6]
+LGBM_NUM_LEAVES = [31, 63]
+XGB_LEARNING_RATE = [0.03, 0.1]
+XGB_MAX_DEPTH = [4, 6]
+
+# LSTM-AE stays capped at 20 epochs (anti-memorisation cap).
+LSTM_MAX_EPOCHS = 20
+LSTM_PATIENCE = 4
+LSTM_HIDDEN_DIMS = [32, 64]
+LSTM_LATENT_DIMS = [8, 16]
+LSTM_LR_LIST = [0.001, 0.003]
+LSTM_BATCH_SIZE = 64
+LSTM_DROPOUT = 0.2
+LSTM_WEIGHT_DECAY = 1e-4
+LAMBDA_RECON = 1.0
+LAMBDA_CLS = 1.0
+
+TABNET_N_D_LIST = [8, 16]
+TABNET_N_STEPS_LIST = [2, 3]
+
+CNN_MAX_EPOCHS = 40
+CNN_PATIENCE = 6
+CNN_CONV_CHANNELS_LIST = [16, 32]
+CNN_HIDDEN_DIMS = [32, 64]
+CNN_KERNEL_SIZES = [3, 5]
+CNN_LR = 0.001
+CNN_BATCH_SIZE = 64
+CNN_DROPOUT = 0.2
+CNN_WINDOW_SIZE = 30
+
+BILSTM_MAX_EPOCHS = 40
+BILSTM_PATIENCE = 6
+BILSTM_HIDDEN_DIMS = [64, 128]
+BILSTM_LAYERS = [1, 2]
+BILSTM_LR_LIST = [0.001, 0.003]
+BILSTM_BATCH_SIZE = 64
+BILSTM_DROPOUT = 0.3
+BILSTM_WINDOW_SIZE = 30
+WINDOW_STEP = 5
 
 
 def build_scaling_pipeline() -> Pipeline:
@@ -93,253 +144,86 @@ def build_scaling_pipeline() -> Pipeline:
         ("imputer", SimpleImputer(strategy="median")),
         ("scaler", StandardScaler()),
     ])
-from ai.lstm_classifier import LSTMAutoencoderClassifier  # noqa: E402
-from ai.cnn_classifier import CNNClassifier  # noqa: E402
-from ai.bilstm_classifier import BiLSTMClassifier  # noqa: E402
-
-# ── Notebook cell 1: CONFIGURATION ─────────────────────────────────────────
-SPLIT_CONFIGS = [
-    (0.8, 0.1, 0.1),
-    (0.7, 0.2, 0.1),
-    (0.6, 0.3, 0.1),
-    (0.7, 0.1, 0.2),
-    (0.6, 0.1, 0.3),
-]
-N_ESTIMATORS_LIST = [100, 200]
-MAX_DEPTH_LIST = [3, 5]
-LEARNING_RATE_LIST = [0.01, 0.1]
-# LSTM epochs are capped at 20 to discourage memorisation of the synthetic
-# dataset. The notebook's CELL 2 mirrors this cap one-for-one.
-EPOCHS_LIST = [10, 20]
-HIDDEN_DIM_LIST = [32, 64]
-LATENT_DIM_LIST = [8, 16]
-LSTM_LR_LIST = [0.001, 0.01]
-LSTM_BATCH_SIZE = 64
-LSTM_DROPOUT = 0.2
-LSTM_WEIGHT_DECAY = 1e-4
-LAMBDA_RECON = 1.0
-LAMBDA_CLS = 1.0
-RANDOM_STATE = 42
-
-CNN_EPOCHS = [20, 40]
-CNN_BATCH_SIZE = 64
-CNN_CONV_CHANNELS_LIST = [16, 32]
-CNN_HIDDEN_DIMS = [32, 64]
-CNN_KERNEL_SIZES = [3, 5]
-CNN_LR_LIST = [0.001, 0.01]
-CNN_DROPOUT = 0.1
-CNN_WINDOW_SIZE = 30
-
-TABNET_N_D_LIST = [8, 16]
-TABNET_N_STEPS_LIST = [2, 3]
-
-BILSTM_EPOCHS = [50, 100]
-BILSTM_BATCH_SIZE = 64
-BILSTM_HIDDEN_DIMS = [64, 128]
-BILSTM_LAYERS = [1, 2]
-BILSTM_LR_LIST = [0.005, 0.01]
-BILSTM_DROPOUT = 0.3
-BILSTM_WINDOW_SIZE = 30
 
 
-# ── Notebook cell 2: prepare_splits ────────────────────────────────────────
-def _can_stratify(labels: pd.Series, test_size: float) -> bool:
-    counts = labels.value_counts()
-    if counts.empty or (counts < 2).any():
-        return False
-    n_items = len(labels)
-    n_test = max(1, int(round(n_items * test_size)))
-    n_train = n_items - n_test
-    return n_test >= labels.nunique() and n_train >= labels.nunique()
+# ── Notebook CELL 3: canonical splits ──────────────────────────────────────
+def prepare_canonical_splits(df: pd.DataFrame) -> dict:
+    """One fixed leakage-safe split shared by every sweep.
 
-
-def _group_label_table(y: pd.Series, groups: pd.Series) -> pd.DataFrame:
-    frame = pd.DataFrame({
-        "group": groups.reset_index(drop=True).astype(str),
-        "label": y.reset_index(drop=True).astype(int),
-    })
-    return (
-        frame.groupby("group", sort=False)["label"]
-        .agg(lambda s: int(s.mode().iloc[0]))
-        .reset_index()
-    )
-
-
-def _split_raw_indices(
-    y: pd.Series,
-    train_ratio: float,
-    val_ratio: float,
-    test_ratio: float,
-    random_state: int,
-    groups: pd.Series | None = None,
-) -> tuple[list[int], list[int], list[int]]:
-    """Split raw rows before any scaling/windowing.
-
-    If ``groups`` is provided, split whole episode/run groups while preserving
-    stratification at the group-majority-label level whenever the dataset has
-    enough groups per class. This is the important bit for CNN/BiLSTM: windows
-    are created only after these raw split memberships are fixed.
+    Returns raw (unscaled, un-imputed) partitions plus per-row episode groups
+    so windowed models never build a window across a split or run boundary.
     """
-    y_reset = y.reset_index(drop=True)
-    if groups is None:
-        row_idx = np.arange(len(y_reset))
-        temp_idx, test_idx = train_test_split(
-            row_idx, test_size=test_ratio, random_state=random_state, stratify=y_reset,
-        )
-        val_size_adjusted = val_ratio / (train_ratio + val_ratio)
-        train_idx, val_idx = train_test_split(
-            temp_idx, test_size=val_size_adjusted, random_state=random_state,
-            stratify=y_reset.iloc[temp_idx],
-        )
-        return sorted(train_idx.tolist()), sorted(val_idx.tolist()), sorted(test_idx.tolist())
+    pool, demo_holdout = split_demo_pool_and_holdout(df)
+    train_df, val_df = split_pool_train_val(pool)
+    return {
+        "pool": pool,
+        "demo_holdout": demo_holdout,
+        "train": train_df,
+        "val": val_df,
+        "train_groups": episode_groups(train_df),
+        "val_groups": episode_groups(val_df),
+        "pool_groups": episode_groups(pool),
+        "holdout_groups": episode_groups(demo_holdout),
+    }
 
-    groups_reset = groups.reset_index(drop=True).astype(str)
-    group_table = _group_label_table(y_reset, groups_reset)
-    test_stratify = (
-        group_table["label"]
-        if _can_stratify(group_table["label"], test_ratio)
-        else None
+
+def scaled_partitions(splits: dict) -> tuple[pd.DataFrame, pd.DataFrame, Pipeline]:
+    """Median-impute + standardise; the pipeline is fit on train only."""
+    scaler = build_scaling_pipeline()
+    X_train = pd.DataFrame(
+        scaler.fit_transform(splits["train"][FEATURES]), columns=FEATURES,
     )
-    train_val_groups, test_groups = train_test_split(
-        group_table["group"],
-        test_size=test_ratio,
-        random_state=random_state,
-        stratify=test_stratify,
-    )
-
-    train_val_table = group_table[group_table["group"].isin(set(train_val_groups))]
-    val_size_adjusted = val_ratio / (train_ratio + val_ratio)
-    val_stratify = (
-        train_val_table["label"]
-        if _can_stratify(train_val_table["label"], val_size_adjusted)
-        else None
-    )
-    train_groups, val_groups = train_test_split(
-        train_val_table["group"],
-        test_size=val_size_adjusted,
-        random_state=random_state,
-        stratify=val_stratify,
-    )
-
-    train_set = set(train_groups.astype(str))
-    val_set = set(val_groups.astype(str))
-    test_set = set(test_groups.astype(str))
-    train_idx = np.flatnonzero(groups_reset.isin(train_set).to_numpy())
-    val_idx = np.flatnonzero(groups_reset.isin(val_set).to_numpy())
-    test_idx = np.flatnonzero(groups_reset.isin(test_set).to_numpy())
-    return sorted(train_idx.tolist()), sorted(val_idx.tolist()), sorted(test_idx.tolist())
+    X_val = pd.DataFrame(scaler.transform(splits["val"][FEATURES]), columns=FEATURES)
+    return X_train, X_val, scaler
 
 
-def _windowize_split(
-    X_part: pd.DataFrame,
-    y_part: pd.Series,
-    groups_part: pd.Series | None,
-    window: int,
-    step: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    if groups_part is None:
-        df_window = X_part.copy()
-        df_window["fault_label"] = y_part.values
-        return engineer_features(df_window, window=window, step=step)
-
-    xs: list[np.ndarray] = []
-    ys: list[np.ndarray] = []
-    df_window = X_part.copy()
-    df_window["fault_label"] = y_part.values
-    df_window["_episode_group"] = groups_part.reset_index(drop=True).astype(str).values
-    for _, group_df in df_window.groupby("_episode_group", sort=False):
-        group_df = group_df.drop(columns=["_episode_group"])
-        if len(group_df) < window:
-            continue
-        X_w, y_w = engineer_features(group_df, window=window, step=step)
-        if len(X_w):
-            xs.append(X_w)
-            ys.append(y_w)
-    if not xs:
-        raise ValueError(
-            f"No {window}-row windows could be built for this split. "
-            "Use longer episodes or a smaller window size."
-        )
-    return np.concatenate(xs, axis=0), np.concatenate(ys, axis=0)
+def windowed_partitions(
+    splits: dict, scaler: Pipeline, window: int, step: int = WINDOW_STEP,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Per-episode sliding windows for CNN/Bi-LSTM, after scaling."""
+    out = []
+    for part, group_key in (("train", "train_groups"), ("val", "val_groups")):
+        part_df = splits[part]
+        scaled = pd.DataFrame(scaler.transform(part_df[FEATURES]), columns=FEATURES)
+        scaled["fault_label"] = part_df["fault_label"].astype(int).values
+        scaled["_g"] = splits[group_key].astype(str).values
+        xs, ys = [], []
+        for _, seg in scaled.groupby("_g", sort=False):
+            seg = seg.drop(columns=["_g"])
+            if len(seg) < window:
+                continue
+            X_w, y_w = engineer_features(seg, window=window, step=step)
+            if len(X_w):
+                xs.append(X_w)
+                ys.append(y_w)
+        if not xs:
+            raise ValueError(f"No {window}-row windows could be built for split '{part}'.")
+        out.append((np.concatenate(xs, axis=0), np.concatenate(ys, axis=0)))
+    (X_train_w, y_train_w), (X_val_w, y_val_w) = out
+    return X_train_w, y_train_w, X_val_w, y_val_w
 
 
-def prepare_splits(
-    X: pd.DataFrame,
-    y: pd.Series,
-    train_ratio: float,
-    val_ratio: float,
-    test_ratio: float,
-    random_state: int = RANDOM_STATE,
-    scale_and_impute: bool = True,
-    window: int = 0,
-    step: int = 5,
-    groups: pd.Series | None = None,
-):
-    train_idx, val_idx, test_idx = _split_raw_indices(
-        y, train_ratio, val_ratio, test_ratio, random_state, groups=groups,
-    )
-    X_reset = X.reset_index(drop=True)
-    y_reset = y.reset_index(drop=True).astype(int)
-    groups_reset = groups.reset_index(drop=True).astype(str) if groups is not None else None
-
-    X_train_raw = X_reset.iloc[train_idx].reset_index(drop=True)
-    X_val_raw = X_reset.iloc[val_idx].reset_index(drop=True)
-    X_test_raw = X_reset.iloc[test_idx].reset_index(drop=True)
-    y_train = y_reset.iloc[train_idx].reset_index(drop=True)
-    y_val = y_reset.iloc[val_idx].reset_index(drop=True)
-    y_test = y_reset.iloc[test_idx].reset_index(drop=True)
-    groups_train = groups_reset.iloc[train_idx].reset_index(drop=True) if groups_reset is not None else None
-    groups_val = groups_reset.iloc[val_idx].reset_index(drop=True) if groups_reset is not None else None
-    groups_test = groups_reset.iloc[test_idx].reset_index(drop=True) if groups_reset is not None else None
-
-    if window > 0:
-        if scale_and_impute:
-            scaler = build_scaling_pipeline()
-            X_train = pd.DataFrame(scaler.fit_transform(X_train_raw), columns=FEATURES)
-            X_val = pd.DataFrame(scaler.transform(X_val_raw), columns=FEATURES)
-            X_test = pd.DataFrame(scaler.transform(X_test_raw), columns=FEATURES)
-        else:
-            X_train, X_val, X_test = X_train_raw, X_val_raw, X_test_raw
-            scaler = None
-
-        X_train_w, y_train_w = _windowize_split(X_train, y_train, groups_train, window, step)
-        X_val_w, y_val_w = _windowize_split(X_val, y_val, groups_val, window, step)
-        X_test_w, y_test_w = _windowize_split(X_test, y_test, groups_test, window, step)
-        return X_train_w, X_val_w, X_test_w, y_train_w, y_val_w, y_test_w, scaler
-
-    if scale_and_impute:
-        scaler = build_scaling_pipeline()
-        X_train_s = pd.DataFrame(
-            scaler.fit_transform(X_train_raw), columns=FEATURES, index=X_train_raw.index
-        )
-        X_val_s = pd.DataFrame(scaler.transform(X_val_raw), columns=FEATURES, index=X_val_raw.index)
-        X_test_s = pd.DataFrame(
-            scaler.transform(X_test_raw), columns=FEATURES, index=X_test_raw.index
-        )
-        return X_train_s, X_val_s, X_test_s, y_train, y_val, y_test, scaler
-
-    return X_train_raw, X_val_raw, X_test_raw, y_train, y_val, y_test, None
-
-
-# ── Notebook cell 3: evaluate_model (sans plotting) ────────────────────────
-def evaluate(model, X_val, y_val, model_name: str, split_label: str, param: dict):
+# ── Notebook CELL 4: evaluation helpers ────────────────────────────────────
+def evaluate(model, X_val, y_val, model_name: str, param: dict):
     y_pred = model.predict(X_val)
-    y_prob = model.predict_proba(X_val)
+    y_prob = model.predict_proba(X_val) if hasattr(model, "predict_proba") else None
     acc = accuracy_score(y_val, y_pred)
     f1 = f1_score(y_val, y_pred, average="macro")
     precision = precision_score(y_val, y_pred, average="macro", zero_division=0)
-    try:
-        auroc = roc_auc_score(y_val, y_prob, multi_class="ovr", average="macro")
-    except ValueError:
-        auroc = float("nan")
+    auroc = float("nan")
+    if y_prob is not None:
+        try:
+            auroc = roc_auc_score(y_val, y_prob, multi_class="ovr", average="macro")
+        except ValueError:
+            pass
     param_str = ", ".join(f"{k}={v}" for k, v in param.items())
     print(
-        f"[{model_name:>13}] split={split_label:<10} {param_str:<60}  "
+        f"[{model_name:>13}] {param_str:<58}  "
         f"acc={acc:.4f}  f1={f1:.4f}  auroc={auroc:.4f}"
     )
     return {
         "model": model_name,
-        "split": split_label,
+        "split": SPLIT_DESCRIPTION,
         "param": param_str,
         "param_dict": dict(param),
         "accuracy": float(acc),
@@ -349,10 +233,76 @@ def evaluate(model, X_val, y_val, model_name: str, split_label: str, param: dict
     }
 
 
-def split_label(t: float, v: float, te: float) -> str:
-    return f"{int(t*100)}/{int(v*100)}/{int(te*100)}"
+def torch_val_scores(model, X_val_t, y_val_np) -> tuple[float, float, float, np.ndarray]:
+    model.eval()
+    with torch.no_grad():
+        out = model(X_val_t)
+        logits = out[1] if isinstance(out, tuple) else out
+        y_pred = torch.argmax(F.softmax(logits, dim=-1), dim=-1).cpu().numpy()
+    return (
+        float(accuracy_score(y_val_np, y_pred)),
+        float(f1_score(y_val_np, y_pred, average="macro")),
+        float(precision_score(y_val_np, y_pred, average="macro", zero_division=0)),
+        y_pred,
+    )
 
 
+def fit_torch_with_early_stopping(
+    model: nn.Module,
+    loader: DataLoader,
+    X_val_t: torch.Tensor,
+    y_val_np: np.ndarray,
+    *,
+    lr: float,
+    weight_decay: float,
+    class_weights: torch.Tensor,
+    max_epochs: int,
+    patience: int,
+    autoencoder: bool = False,
+) -> tuple[dict, int, float]:
+    """Train with per-epoch val-F1 early stopping; return the best epoch's state."""
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    cls_loss_fn = nn.CrossEntropyLoss(weight=class_weights)
+    recon_loss_fn = nn.MSELoss()
+
+    best_f1, best_state, best_epoch, bad_epochs = -1.0, None, 0, 0
+    for epoch in range(1, max_epochs + 1):
+        model.train()
+        for X_batch, y_batch in loader:
+            optimizer.zero_grad()
+            if autoencoder:
+                X_recon, logits = model(X_batch)
+                loss = (
+                    LAMBDA_RECON * recon_loss_fn(X_recon, X_batch)
+                    + LAMBDA_CLS * cls_loss_fn(logits, y_batch)
+                )
+            else:
+                loss = cls_loss_fn(model(X_batch), y_batch)
+            loss.backward()
+            optimizer.step()
+
+        _, val_f1, _, _ = torch_val_scores(model, X_val_t, y_val_np)
+        if val_f1 > best_f1:
+            best_f1, best_epoch, bad_epochs = val_f1, epoch, 0
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+        else:
+            bad_epochs += 1
+            if bad_epochs >= patience:
+                break
+    model.load_state_dict(best_state)
+    return best_state, best_epoch, best_f1
+
+
+def class_weight_tensor(y: np.ndarray, device: torch.device) -> torch.Tensor:
+    classes = np.unique(y)
+    weights = compute_class_weight(class_weight="balanced", classes=classes, y=y)
+    full = np.ones(len(CLASS_NAMES), dtype=np.float32)
+    for cls, w in zip(classes, weights):
+        full[int(cls)] = w
+    return torch.tensor(full, dtype=torch.float32, device=device)
+
+
+# ── Notebook CELL 5: shortcut/sanity baselines ─────────────────────────────
 def run_sanity_baselines(training_pool: pd.DataFrame, demo_holdout: pd.DataFrame) -> None:
     """Print shortcut diagnostics before expensive model sweeps.
 
@@ -377,30 +327,21 @@ def run_sanity_baselines(training_pool: pd.DataFrame, demo_holdout: pd.DataFrame
     top3 = ranking.head(3)["feature"].tolist()
 
     feature_sets = {
-        "temperature_only": ["temperature_c"] if "temperature_c" in FEATURES else [FEATURES[-1]],
+        "temperature_only": ["temperature_c"],
         "no_temperature": [c for c in FEATURES if c != "temperature_c"],
         "top3_anova": top3,
         "full": FEATURES,
     }
-    model = lgb.LGBMClassifier(
-        n_estimators=100,
-        max_depth=3,
-        learning_rate=0.1,
-        random_state=RANDOM_STATE,
-        class_weight="balanced",
-        verbose=-1,
-    )
-
     results = []
     for name, columns in feature_sets.items():
-        pipe = Pipeline([
-            ("imputer", SimpleImputer(strategy="median")),
-            ("model", model.__class__(**model.get_params())),
-        ])
+        model = lgb.LGBMClassifier(
+            n_estimators=100, max_depth=3, learning_rate=0.1,
+            random_state=RANDOM_STATE, class_weight="balanced", verbose=-1,
+        )
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="X does not have valid feature names")
-            pipe.fit(X_train[columns], y_train)
-            pred = pipe.predict(X_holdout[columns])
+            model.fit(X_train[columns], y_train)
+            pred = model.predict(X_holdout[columns])
         results.append({
             "baseline": name,
             "features": columns,
@@ -425,6 +366,7 @@ def run_sanity_baselines(training_pool: pd.DataFrame, demo_holdout: pd.DataFrame
 
     SHARED_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
+        "split": SPLIT_DESCRIPTION,
         "top_anova_features": ranking.head(10).to_dict(orient="records"),
         "baselines": results,
         "notes": (
@@ -436,473 +378,383 @@ def run_sanity_baselines(training_pool: pd.DataFrame, demo_holdout: pd.DataFrame
     print(f"[save] {SHARED_DIR}/sanity_baselines.json")
 
 
-# ── Notebook cell 4: RandomForest sweep ────────────────────────────────────
-def sweep_random_forest(X, y, groups: pd.Series | None = None):
-    print("\n=== RandomForest sweep (5 splits × 2 × 2 = 20 configs) ===")
+# ── Notebook CELL 6: RandomForest sweep ────────────────────────────────────
+def sweep_random_forest(splits: dict):
+    total = len(RF_N_ESTIMATORS) * len(RF_MAX_DEPTH)
+    print(f"\n=== RandomForest sweep ({total} configs, fixed canonical split) ===")
+    X_train, X_val, scaler = scaled_partitions(splits)
+    y_train = splits["train"]["fault_label"].astype(int)
+    y_val = splits["val"]["fault_label"].astype(int)
+
     best = {"f1": -1.0}
-    for tr, vr, te in SPLIT_CONFIGS:
-        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(
-            X, y, tr, vr, te, scale_and_impute=True, groups=groups,
-        )
-        for n in N_ESTIMATORS_LIST:
-            for d in MAX_DEPTH_LIST:
-                model = RandomForestClassifier(
-                    n_estimators=n, max_depth=d,
-                    random_state=RANDOM_STATE, class_weight="balanced",
+    for n in RF_N_ESTIMATORS:
+        for d in RF_MAX_DEPTH:
+            model = RandomForestClassifier(
+                n_estimators=n, max_depth=d, random_state=RANDOM_STATE,
+                class_weight="balanced", n_jobs=-1,
+            )
+            model.fit(X_train, y_train)
+            result = evaluate(model, X_val, y_val, "RandomForest",
+                              {"n_estimators": n, "max_depth": d})
+            if result["f1"] > best["f1"]:
+                best = {**result, "model_obj": model, "scaler": scaler}
+    print(f"--- best RF: {best['param']}  f1={best['f1']:.4f}")
+    return best
+
+
+# ── Notebook CELL 7: LightGBM sweep (early stopping) ───────────────────────
+def sweep_lightgbm(splits: dict):
+    total = len(LGBM_LEARNING_RATE) * len(LGBM_MAX_DEPTH) * len(LGBM_NUM_LEAVES)
+    print(f"\n=== LightGBM sweep ({total} configs, early stopping {GBM_EARLY_STOPPING}) ===")
+    X_train = splits["train"][FEATURES]
+    X_val = splits["val"][FEATURES]
+    y_train = splits["train"]["fault_label"].astype(int)
+    y_val = splits["val"]["fault_label"].astype(int)
+
+    best = {"f1": -1.0}
+    for lr in LGBM_LEARNING_RATE:
+        for d in LGBM_MAX_DEPTH:
+            for leaves in LGBM_NUM_LEAVES:
+                model = lgb.LGBMClassifier(
+                    n_estimators=GBM_MAX_ROUNDS, max_depth=d, num_leaves=leaves,
+                    learning_rate=lr, random_state=RANDOM_STATE,
+                    class_weight="balanced", verbose=-1,
                 )
-                model.fit(X_train, y_train)
-                result = evaluate(
-                    model, X_val, y_val, "RandomForest",
-                    split_label(tr, vr, te),
-                    {"n_estimators": n, "max_depth": d},
+                model.fit(
+                    X_train, y_train,
+                    eval_set=[(X_val, y_val)],
+                    callbacks=[lgb.early_stopping(GBM_EARLY_STOPPING, verbose=False)],
                 )
+                rounds = int(model.best_iteration_ or GBM_MAX_ROUNDS)
+                result = evaluate(model, X_val, y_val, "LightGBM",
+                                  {"learning_rate": lr, "max_depth": d,
+                                   "num_leaves": leaves, "best_rounds": rounds})
                 if result["f1"] > best["f1"]:
-                    best = {**result, "model_obj": model, "scaler": scaler,
-                            "split_tuple": (tr, vr, te)}
-    print(f"--- best RF: {best['split']}  {best['param']}  f1={best['f1']:.4f}")
+                    best = {**result, "model_obj": model, "scaler": None}
+    print(f"--- best LightGBM: {best['param']}  f1={best['f1']:.4f}")
     return best
 
 
-# ── Notebook cell 5: LightGBM sweep ────────────────────────────────────────
-def sweep_lightgbm(X, y, groups: pd.Series | None = None):
-    print("\n=== LightGBM sweep (5 splits × 2 × 2 × 2 = 40 configs) ===")
+# ── Notebook CELL 8: XGBoost sweep (early stopping + sample weights) ───────
+def sweep_xgboost(splits: dict):
+    total = len(XGB_LEARNING_RATE) * len(XGB_MAX_DEPTH)
+    print(f"\n=== XGBoost sweep ({total} configs, early stopping {GBM_EARLY_STOPPING}) ===")
+    X_train = splits["train"][FEATURES]
+    X_val = splits["val"][FEATURES]
+    y_train = splits["train"]["fault_label"].astype(int)
+    y_val = splits["val"]["fault_label"].astype(int)
+    sample_weight = compute_sample_weight("balanced", y_train)
+
     best = {"f1": -1.0}
-    for tr, vr, te in SPLIT_CONFIGS:
-        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(
-            X, y, tr, vr, te, scale_and_impute=False, groups=groups,
-        )
-        for n in N_ESTIMATORS_LIST:
-            for d in MAX_DEPTH_LIST:
-                for lr in LEARNING_RATE_LIST:
-                    model = lgb.LGBMClassifier(
-                        n_estimators=n, max_depth=d, learning_rate=lr,
-                        random_state=RANDOM_STATE, class_weight="balanced",
-                        verbose=-1,
-                    )
-                    model.fit(X_train, y_train)
-                    result = evaluate(
-                        model, X_val, y_val, "LightGBM",
-                        split_label(tr, vr, te),
-                        {"n_estimators": n, "max_depth": d, "learning_rate": lr},
-                    )
-                    if result["f1"] > best["f1"]:
-                        best = {**result, "model_obj": model, "scaler": scaler,
-                                "split_tuple": (tr, vr, te)}
-    print(f"--- best LightGBM: {best['split']}  {best['param']}  f1={best['f1']:.4f}")
+    for lr in XGB_LEARNING_RATE:
+        for d in XGB_MAX_DEPTH:
+            model = xgb.XGBClassifier(
+                n_estimators=GBM_MAX_ROUNDS, max_depth=d, learning_rate=lr,
+                random_state=RANDOM_STATE, eval_metric="mlogloss",
+                early_stopping_rounds=GBM_EARLY_STOPPING, verbosity=0,
+            )
+            model.fit(
+                X_train, y_train,
+                sample_weight=sample_weight,
+                eval_set=[(X_val, y_val)],
+                verbose=False,
+            )
+            rounds = int(getattr(model, "best_iteration", GBM_MAX_ROUNDS) or GBM_MAX_ROUNDS)
+            result = evaluate(model, X_val, y_val, "XGBoost",
+                              {"learning_rate": lr, "max_depth": d, "best_rounds": rounds})
+            if result["f1"] > best["f1"]:
+                best = {**result, "model_obj": model, "scaler": None}
+    print(f"--- best XGBoost: {best['param']}  f1={best['f1']:.4f}")
     return best
 
 
-# ── Notebook cell 6: XGBoost sweep ─────────────────────────────────────────
-def sweep_xgboost(X, y, groups: pd.Series | None = None):
-    print("\n=== XGBoost sweep (5 splits × 2 × 2 × 2 = 40 configs) ===")
-    best = {"f1": -1.0}
-    for tr, vr, te in SPLIT_CONFIGS:
-        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(
-            X, y, tr, vr, te, scale_and_impute=False, groups=groups,
-        )
-        for n in N_ESTIMATORS_LIST:
-            for d in MAX_DEPTH_LIST:
-                for lr in LEARNING_RATE_LIST:
-                    model = xgb.XGBClassifier(
-                        n_estimators=n, max_depth=d, learning_rate=lr,
-                        random_state=RANDOM_STATE,
-                        eval_metric="mlogloss", verbosity=0,
-                    )
-                    model.fit(X_train, y_train)
-                    result = evaluate(
-                        model, X_val, y_val, "XGBoost",
-                        split_label(tr, vr, te),
-                        {"n_estimators": n, "max_depth": d, "learning_rate": lr},
-                    )
-                    if result["f1"] > best["f1"]:
-                        best = {**result, "model_obj": model, "scaler": scaler,
-                                "split_tuple": (tr, vr, te)}
-    print(f"--- best XGBoost: {best['split']}  {best['param']}  f1={best['f1']:.4f}")
-    return best
-
-
-# ── Notebook cell 7: LSTM-AE+CLS sweep ─────────────────────────────────────
-def sweep_lstm_ae(X, y, num_classes: int, groups: pd.Series | None = None):
+# ── Notebook CELL 9: LSTM-AE+CLS sweep (epoch cap 20, early stopping) ──────
+def sweep_lstm_ae(splits: dict, num_classes: int):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    total = (
-        len(SPLIT_CONFIGS) * len(EPOCHS_LIST) * len(HIDDEN_DIM_LIST)
-        * len(LATENT_DIM_LIST) * len(LSTM_LR_LIST)
-    )
-    print(f"\n=== LSTM-AE+CLS sweep ({len(SPLIT_CONFIGS)} splits × "
-          f"{len(EPOCHS_LIST)} × {len(HIDDEN_DIM_LIST)} × {len(LATENT_DIM_LIST)} × "
-          f"{len(LSTM_LR_LIST)} = {total} configs) on {device} ===")
+    total = len(LSTM_HIDDEN_DIMS) * len(LSTM_LATENT_DIMS) * len(LSTM_LR_LIST)
+    print(f"\n=== LSTM-AE+CLS sweep ({total} configs, max {LSTM_MAX_EPOCHS} epochs, "
+          f"patience {LSTM_PATIENCE}) on {device} ===")
     if device.type == "cuda":
         print(f"[env] {torch.cuda.get_device_name(0)}")
-    input_dim = len(FEATURES)
+
+    X_train, X_val, scaler = scaled_partitions(splits)
+    y_train = splits["train"]["fault_label"].astype(int).values
+    y_val = splits["val"]["fault_label"].astype(int).values
+
+    X_train_t = torch.tensor(X_train.values, dtype=torch.float32, device=device).unsqueeze(1)
+    X_val_t = torch.tensor(X_val.values, dtype=torch.float32, device=device).unsqueeze(1)
+    y_train_t = torch.tensor(y_train, dtype=torch.long, device=device)
+    loader = DataLoader(TensorDataset(X_train_t, y_train_t),
+                        batch_size=LSTM_BATCH_SIZE, shuffle=True)
+    weights = class_weight_tensor(y_train, device)
 
     best = {"f1": -1.0}
     config_idx = 0
-    for tr, vr, te in SPLIT_CONFIGS:
-        X_train, X_val, X_test, y_train, y_val, y_test, scaler = prepare_splits(
-            X, y, tr, vr, te, scale_and_impute=True, groups=groups,
-        )
-        X_train_t = torch.tensor(X_train.values, dtype=torch.float32, device=device).unsqueeze(1)
-        X_val_t = torch.tensor(X_val.values, dtype=torch.float32, device=device).unsqueeze(1)
-        y_train_t = torch.tensor(y_train.values, dtype=torch.long, device=device)
-        y_val_np = y_val.values
-
-        loader_dataset = TensorDataset(X_train_t, y_train_t)
-        loader = DataLoader(loader_dataset, batch_size=LSTM_BATCH_SIZE, shuffle=True)
-
-        for n_epochs in EPOCHS_LIST:
-            for hidden_dim in HIDDEN_DIM_LIST:
-                for latent_dim in LATENT_DIM_LIST:
-                    for lr in LSTM_LR_LIST:
-                        config_idx += 1
-                        t0 = time.time()
-                        model = LSTMAutoencoderClassifier(
-                            input_dim=input_dim, hidden_dim=hidden_dim,
-                            latent_dim=latent_dim, num_classes=num_classes,
-                            dropout=LSTM_DROPOUT,
-                        ).to(device)
-                        optimizer = torch.optim.Adam(
-                            model.parameters(), lr=lr, weight_decay=LSTM_WEIGHT_DECAY,
-                        )
-                        recon_loss_fn = nn.MSELoss()
-                        cls_loss_fn = nn.CrossEntropyLoss()
-
-                        model.train()
-                        for _ in range(n_epochs):
-                            for X_batch, y_batch in loader:
-                                optimizer.zero_grad()
-                                X_recon, logits = model(X_batch)
-                                loss = (
-                                    LAMBDA_RECON * recon_loss_fn(X_recon, X_batch)
-                                    + LAMBDA_CLS * cls_loss_fn(logits, y_batch)
-                                )
-                                loss.backward()
-                                optimizer.step()
-
-                        model.eval()
-                        with torch.no_grad():
-                            _, val_logits = model(X_val_t)
-                            y_pred = torch.argmax(F.softmax(val_logits, dim=-1), dim=-1).cpu().numpy()
-                        acc = float(accuracy_score(y_val_np, y_pred))
-                        f1 = float(f1_score(y_val_np, y_pred, average="macro"))
-                        precision = float(precision_score(y_val_np, y_pred, average="macro", zero_division=0))
-
-                        flag = ""
-                        if f1 > best["f1"]:
-                            flag = "  *** new best"
-                            best = {
-                                "model": "LSTM-AE", "split": split_label(tr, vr, te),
-                                "param": f"epochs={n_epochs}, hidden={hidden_dim}, "
-                                         f"latent={latent_dim}, lr={lr}",
-                                "param_dict": {
-                                    "epochs": n_epochs, "hidden": hidden_dim,
-                                    "latent": latent_dim, "lr": lr,
-                                    "batch": LSTM_BATCH_SIZE,
-                                    "lambda_recon": LAMBDA_RECON,
-                                    "lambda_cls": LAMBDA_CLS,
-                                },
-                                "accuracy": acc, "f1": f1, "precision": precision,
-                                "auroc": None,
-                                "state_dict": {k: v.cpu().clone() for k, v in model.state_dict().items()},
-                                "scaler": scaler,
-                                "split_tuple": (tr, vr, te),
-                                "X_test_t_cpu": X_test.values,
-                                "y_test": y_test.values,
-                            }
-                        print(
-                            f"[{config_idx:>3}/{total}] split={split_label(tr,vr,te):<10} "
-                            f"epochs={n_epochs:<3} h={hidden_dim:<3} l={latent_dim:<3} "
-                            f"lr={lr:<6} acc={acc:.4f} f1={f1:.4f} ({time.time()-t0:.1f}s){flag}"
-                        )
-
-    print(f"--- best LSTM-AE: {best['split']}  {best['param']}  f1={best['f1']:.4f}")
+    for hidden_dim in LSTM_HIDDEN_DIMS:
+        for latent_dim in LSTM_LATENT_DIMS:
+            for lr in LSTM_LR_LIST:
+                config_idx += 1
+                t0 = time.time()
+                model = LSTMAutoencoderClassifier(
+                    input_dim=len(FEATURES), hidden_dim=hidden_dim,
+                    latent_dim=latent_dim, num_classes=num_classes,
+                    dropout=LSTM_DROPOUT,
+                ).to(device)
+                state, best_epoch, _ = fit_torch_with_early_stopping(
+                    model, loader, X_val_t, y_val,
+                    lr=lr, weight_decay=LSTM_WEIGHT_DECAY, class_weights=weights,
+                    max_epochs=LSTM_MAX_EPOCHS, patience=LSTM_PATIENCE,
+                    autoencoder=True,
+                )
+                acc, f1, precision, _ = torch_val_scores(model, X_val_t, y_val)
+                flag = ""
+                if f1 > best["f1"]:
+                    flag = "  *** new best"
+                    best = {
+                        "model": "LSTM-AE", "split": SPLIT_DESCRIPTION,
+                        "param": f"hidden={hidden_dim}, latent={latent_dim}, "
+                                 f"lr={lr}, best_epoch={best_epoch}",
+                        "param_dict": {
+                            "hidden": hidden_dim, "latent": latent_dim, "lr": lr,
+                            "epochs": best_epoch, "max_epochs": LSTM_MAX_EPOCHS,
+                            "batch": LSTM_BATCH_SIZE,
+                            "lambda_recon": LAMBDA_RECON, "lambda_cls": LAMBDA_CLS,
+                        },
+                        "accuracy": acc, "f1": f1, "precision": precision,
+                        "auroc": None,
+                        "state_dict": copy.deepcopy(state),
+                        "scaler": scaler,
+                    }
+                print(
+                    f"[{config_idx:>2}/{total}] h={hidden_dim:<3} l={latent_dim:<3} "
+                    f"lr={lr:<6} best_epoch={best_epoch:<3} acc={acc:.4f} f1={f1:.4f} "
+                    f"({time.time()-t0:.1f}s){flag}"
+                )
+    print(f"--- best LSTM-AE: {best['param']}  f1={best['f1']:.4f}")
     return best, device
 
-# ── Notebook cell 8: TabNet sweep ──────────────────────────────────────────
-def sweep_tabnet(X, y, groups: pd.Series | None = None):
-    print("\n=== TabNet sweep (1 fixed split × 2 × 2 = 4 configs) ===")
+
+# ── Notebook CELL 10: TabNet sweep ─────────────────────────────────────────
+def sweep_tabnet(splits: dict):
+    total = len(TABNET_N_D_LIST) * len(TABNET_N_STEPS_LIST)
+    print(f"\n=== TabNet sweep ({total} configs) ===")
     if TabNetClassifier is None:
         print(f"[TabNet] skipped: pytorch-tabnet unavailable ({TABNET_IMPORT_ERROR})")
         return {
-            "model": "TabNet",
-            "split": "skipped",
-            "param": "skipped",
-            "param_dict": {},
-            "accuracy": 0.0,
-            "f1": -1.0,
-            "precision": 0.0,
-            "auroc": None,
-            "skipped": True,
+            "model": "TabNet", "split": "skipped", "param": "skipped",
+            "param_dict": {}, "accuracy": 0.0, "f1": -1.0, "precision": 0.0,
+            "auroc": None, "skipped": True,
             "skip_reason": f"pytorch-tabnet unavailable: {TABNET_IMPORT_ERROR}",
         }
+
+    X_train, X_val, scaler = scaled_partitions(splits)
+    y_train = splits["train"]["fault_label"].astype(int)
+    y_val = splits["val"]["fault_label"].astype(int)
+
+    # evaluate() expects DataFrame in / predict out; TabNet wants numpy.
+    class TabNetWrapper:
+        def __init__(self, m):
+            self.m = m
+        def predict(self, X):
+            return self.m.predict(X.values if isinstance(X, pd.DataFrame) else X)
+        def predict_proba(self, X):
+            return self.m.predict_proba(X.values if isinstance(X, pd.DataFrame) else X)
+        def save_model(self, path):
+            self.m.save_model(path)
+
     best = {"f1": -1.0}
-    
-    # Fixed split to save extreme training times for DL models
-    tr, vr, te = 0.8, 0.1, 0.1
-    X_train, X_val, X_test, y_train, y_val, y_test, scaler = prepare_splits(
-        X, y, tr, vr, te, scale_and_impute=True, groups=groups,
-    )
-    
     for n_d in TABNET_N_D_LIST:
         for n_steps in TABNET_N_STEPS_LIST:
             model = TabNetClassifier(
-                n_d=n_d, n_a=n_d,
-                n_steps=n_steps,
-                gamma=1.5,
-                n_independent=1,
-                n_shared=2,
-                momentum=0.02,
-                mask_type='sparsemax',
+                n_d=n_d, n_a=n_d, n_steps=n_steps, gamma=1.5,
+                n_independent=1, n_shared=2, momentum=0.02,
+                mask_type="sparsemax",
                 optimizer_fn=torch.optim.Adam,
                 optimizer_params=dict(lr=2e-2, weight_decay=1e-3),
                 scheduler_params={"step_size": 10, "gamma": 0.9},
                 scheduler_fn=torch.optim.lr_scheduler.StepLR,
-                verbose=0,
-                seed=RANDOM_STATE,
+                verbose=0, seed=RANDOM_STATE,
             )
             model.fit(
                 X_train.values, y_train.values,
                 eval_set=[(X_val.values, y_val.values)],
-                eval_name=['val'],
-                eval_metric=['balanced_accuracy'],
-                weights=1,
-                max_epochs=50,
-                patience=7,
-                batch_size=256,
-                virtual_batch_size=128,
-                num_workers=0,
-                drop_last=False,
+                eval_name=["val"], eval_metric=["balanced_accuracy"],
+                weights=1,                       # balanced sampling
+                max_epochs=50, patience=7,
+                batch_size=256, virtual_batch_size=128,
+                num_workers=0, drop_last=False,
             )
-            
-            # evaluate expects pd.DataFrame, TabNet predict expects numpy array.
-            # evaluate internally calls model.predict(X_val) so we wrap it.
-            class TabNetWrapper:
-                def __init__(self, m):
-                    self.m = m
-                def predict(self, X):
-                    return self.m.predict(X.values if isinstance(X, pd.DataFrame) else X)
-                def predict_proba(self, X):
-                    return self.m.predict_proba(X.values if isinstance(X, pd.DataFrame) else X)
-                def save_model(self, path):
-                    self.m.save_model(path)
-
-            wrapped_model = TabNetWrapper(model)
-            
-            result = evaluate(
-                wrapped_model, X_val, y_val, "TabNet",
-                split_label(tr, vr, te),
-                {"n_d": n_d, "n_steps": n_steps},
-            )
+            wrapped = TabNetWrapper(model)
+            result = evaluate(wrapped, X_val, y_val, "TabNet",
+                              {"n_d": n_d, "n_steps": n_steps})
             if result["f1"] > best.get("f1", -1.0):
-                best = {**result, "model_obj": wrapped_model, "scaler": scaler,
-                        "split_tuple": (tr, vr, te)}
-                
-    print(f"--- best TabNet: {best['split']}  {best['param']}  f1={best['f1']:.4f}")
+                best = {**result, "model_obj": wrapped, "scaler": scaler}
+    print(f"--- best TabNet: {best['param']}  f1={best['f1']:.4f}")
     return best
 
-# ── Notebook cell 9: CNN sweep ─────────────────────────────────────────────
-def sweep_cnn(X, y, num_classes: int, groups: pd.Series | None = None):
+
+# ── Notebook CELL 11: CNN sweep (windowed, early stopping) ─────────────────
+def sweep_cnn(splits: dict, num_classes: int):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    total = (
-        len(SPLIT_CONFIGS) * len(CNN_EPOCHS) * len(CNN_CONV_CHANNELS_LIST)
-        * len(CNN_HIDDEN_DIMS) * len(CNN_KERNEL_SIZES) * len(CNN_LR_LIST)
+    total = len(CNN_CONV_CHANNELS_LIST) * len(CNN_HIDDEN_DIMS) * len(CNN_KERNEL_SIZES)
+    print(f"\n=== CNN sweep ({total} configs, window {CNN_WINDOW_SIZE}, "
+          f"max {CNN_MAX_EPOCHS} epochs, patience {CNN_PATIENCE}) on {device} ===")
+
+    _, _, scaler = scaled_partitions(splits)
+    X_train_w, y_train_w, X_val_w, y_val_w = windowed_partitions(
+        splits, scaler, CNN_WINDOW_SIZE,
     )
-    print(f"\n=== CNN sweep ({len(SPLIT_CONFIGS)} splits × {len(CNN_EPOCHS)} × "
-          f"{len(CNN_CONV_CHANNELS_LIST)} × {len(CNN_HIDDEN_DIMS)} × "
-          f"{len(CNN_KERNEL_SIZES)} × {len(CNN_LR_LIST)} = {total} configs) on {device} ===")
-    if device.type == "cuda":
-        print(f"[env] {torch.cuda.get_device_name(0)}")
+    print(f"[data] windows: train={X_train_w.shape}  val={X_val_w.shape}")
+
+    X_train_t = torch.tensor(X_train_w, dtype=torch.float32, device=device)
+    X_val_t = torch.tensor(X_val_w, dtype=torch.float32, device=device)
+    y_train_t = torch.tensor(y_train_w, dtype=torch.long, device=device)
+    loader = DataLoader(TensorDataset(X_train_t, y_train_t),
+                        batch_size=CNN_BATCH_SIZE, shuffle=True)
+    weights = class_weight_tensor(y_train_w, device)
 
     best = {"f1": -1.0}
     config_idx = 0
-    input_dim = len(FEATURES)
-    cnn_window_size = CNN_WINDOW_SIZE
-
-    for tr, vr, te in SPLIT_CONFIGS:
-        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(
-            X, y, tr, vr, te, scale_and_impute=True, window=cnn_window_size, groups=groups,
-        )
-
-        unique_classes = np.unique(y_train)
-        weights = compute_class_weight(class_weight="balanced", classes=unique_classes, y=y_train)
-        class_weights = torch.tensor(weights, dtype=torch.float32, device=device)
-
-        X_train_t = torch.tensor(X_train, dtype=torch.float32, device=device)
-        X_val_t = torch.tensor(X_val, dtype=torch.float32, device=device)
-        y_train_t = torch.tensor(y_train, dtype=torch.long, device=device)
-        y_val_np = y_val
-
-        loader = DataLoader(
-            TensorDataset(X_train_t, y_train_t), batch_size=CNN_BATCH_SIZE, shuffle=True,
-        )
-
-        for n_epochs in CNN_EPOCHS:
-            for conv_channels in CNN_CONV_CHANNELS_LIST:
-                for hidden_dim in CNN_HIDDEN_DIMS:
-                    for kernel_size in CNN_KERNEL_SIZES:
-                        for lr in CNN_LR_LIST:
-                            config_idx += 1
-                            t0 = time.time()
-                            model = CNNClassifier(
-                                input_dim=input_dim,
-                                num_classes=num_classes,
-                                window_size=cnn_window_size,
-                                conv_channels=conv_channels,
-                                kernel_size=kernel_size,
-                                hidden_dim=hidden_dim,
-                                dropout=CNN_DROPOUT,
-                            ).to(device)
-                            optimizer = torch.optim.Adam(
-                                model.parameters(), lr=lr, weight_decay=1e-4,
-                            )
-                            loss_fn = nn.CrossEntropyLoss(weight=class_weights)
-
-                            model.train()
-                            for _ in range(n_epochs):
-                                for X_batch, y_batch in loader:
-                                    optimizer.zero_grad()
-                                    logits = model(X_batch)
-                                    loss = loss_fn(logits, y_batch)
-                                    loss.backward()
-                                    optimizer.step()
-
-                            model.eval()
-                            with torch.no_grad():
-                                val_logits = model(X_val_t)
-                                y_pred = torch.argmax(F.softmax(val_logits, dim=-1), dim=-1).cpu().numpy()
-                            acc = float(accuracy_score(y_val_np, y_pred))
-                            f1 = float(f1_score(y_val_np, y_pred, average="macro"))
-                            precision = float(precision_score(y_val_np, y_pred, average="macro", zero_division=0))
-
-                            if f1 > best["f1"]:
-                                best = {
-                                    "model": "CNN", "split": split_label(tr, vr, te),
-                                    "param": f"epochs={n_epochs}, conv_channels={conv_channels}, "
-                                             f"hidden={hidden_dim}, kernel={kernel_size}, lr={lr}",
-                                    "param_dict": {
-                                        "epochs": n_epochs,
-                                        "conv_channels": conv_channels,
-                                        "hidden_dim": hidden_dim,
-                                        "kernel_size": kernel_size,
-                                        "lr": lr,
-                                        "dropout": CNN_DROPOUT,
-                                        "window": cnn_window_size,
-                                    },
-                                    "accuracy": acc,
-                                    "f1": f1,
-                                    "precision": precision,
-                                    "auroc": None,
-                                    "state_dict": {k: v.cpu().clone() for k, v in model.state_dict().items()},
-                                    "scaler": scaler,
-                                    "split_tuple": (tr, vr, te),
-                                }
-                            print(
-                                f"[{config_idx:>3}/{total}] split={split_label(tr,vr,te):<10} "
-                                f"epochs={n_epochs:<3} cc={conv_channels:<3} h={hidden_dim:<3} "
-                                f"k={kernel_size:<3} lr={lr:<6} acc={acc:.4f} f1={f1:.4f} "
-                                f"({time.time()-t0:.1f}s)"
-                            )
-
-    print(f"--- best CNN: {best['split']}  {best['param']}  f1={best['f1']:.4f}")
+    for conv_channels in CNN_CONV_CHANNELS_LIST:
+        for hidden_dim in CNN_HIDDEN_DIMS:
+            for kernel_size in CNN_KERNEL_SIZES:
+                config_idx += 1
+                t0 = time.time()
+                model = CNNClassifier(
+                    input_dim=len(FEATURES), num_classes=num_classes,
+                    window_size=CNN_WINDOW_SIZE, conv_channels=conv_channels,
+                    kernel_size=kernel_size, hidden_dim=hidden_dim,
+                    dropout=CNN_DROPOUT,
+                ).to(device)
+                state, best_epoch, _ = fit_torch_with_early_stopping(
+                    model, loader, X_val_t, y_val_w,
+                    lr=CNN_LR, weight_decay=1e-4, class_weights=weights,
+                    max_epochs=CNN_MAX_EPOCHS, patience=CNN_PATIENCE,
+                )
+                acc, f1, precision, _ = torch_val_scores(model, X_val_t, y_val_w)
+                if f1 > best["f1"]:
+                    best = {
+                        "model": "CNN", "split": SPLIT_DESCRIPTION,
+                        "param": f"conv_channels={conv_channels}, hidden={hidden_dim}, "
+                                 f"kernel={kernel_size}, best_epoch={best_epoch}",
+                        "param_dict": {
+                            "conv_channels": conv_channels, "hidden_dim": hidden_dim,
+                            "kernel_size": kernel_size, "lr": CNN_LR,
+                            "epochs": best_epoch, "max_epochs": CNN_MAX_EPOCHS,
+                            "dropout": CNN_DROPOUT, "window": CNN_WINDOW_SIZE,
+                        },
+                        "accuracy": acc, "f1": f1, "precision": precision,
+                        "auroc": None,
+                        "state_dict": copy.deepcopy(state),
+                        "scaler": scaler,
+                    }
+                print(
+                    f"[{config_idx:>2}/{total}] cc={conv_channels:<3} h={hidden_dim:<3} "
+                    f"k={kernel_size:<3} best_epoch={best_epoch:<3} acc={acc:.4f} "
+                    f"f1={f1:.4f} ({time.time()-t0:.1f}s)"
+                )
+    print(f"--- best CNN: {best['param']}  f1={best['f1']:.4f}")
     return best, device
 
-# ── Notebook cell 10: Bi-LSTM sweep ────────────────────────────────────────
-def sweep_bilstm(X, y, num_classes: int, groups: pd.Series | None = None):
+
+# ── Notebook CELL 12: Bi-LSTM sweep (windowed, early stopping) ─────────────
+def sweep_bilstm(splits: dict, num_classes: int):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"\n=== Bi-LSTM sweep on {device} ===")
-    
+    total = len(BILSTM_HIDDEN_DIMS) * len(BILSTM_LAYERS) * len(BILSTM_LR_LIST)
+    print(f"\n=== Bi-LSTM sweep ({total} configs, window {BILSTM_WINDOW_SIZE}, "
+          f"max {BILSTM_MAX_EPOCHS} epochs, patience {BILSTM_PATIENCE}) on {device} ===")
+
+    _, _, scaler = scaled_partitions(splits)
+    X_train_w, y_train_w, X_val_w, y_val_w = windowed_partitions(
+        splits, scaler, BILSTM_WINDOW_SIZE,
+    )
+    X_train_t = torch.tensor(X_train_w, dtype=torch.float32, device=device)
+    X_val_t = torch.tensor(X_val_w, dtype=torch.float32, device=device)
+    y_train_t = torch.tensor(y_train_w, dtype=torch.long, device=device)
+    loader = DataLoader(TensorDataset(X_train_t, y_train_t),
+                        batch_size=BILSTM_BATCH_SIZE, shuffle=True)
+    weights = class_weight_tensor(y_train_w, device)
+
     best = {"f1": -1.0}
-    input_dim = len(FEATURES)
-    window_size = BILSTM_WINDOW_SIZE
-    total = len(SPLIT_CONFIGS) * len(BILSTM_EPOCHS) * len(BILSTM_HIDDEN_DIMS) * len(BILSTM_LAYERS) * len(BILSTM_LR_LIST)
     config_idx = 0
-
-    for tr, vr, te in SPLIT_CONFIGS:
-        X_train, X_val, _, y_train, y_val, _, scaler = prepare_splits(
-            X, y, tr, vr, te, scale_and_impute=True, window=window_size, groups=groups,
-        )
-
-        unique_classes = np.unique(y_train)
-        weights = compute_class_weight(class_weight="balanced", classes=unique_classes, y=y_train)
-        class_weights = torch.tensor(weights, dtype=torch.float32, device=device)
-
-        X_train_t = torch.tensor(X_train, dtype=torch.float32, device=device)
-        X_val_t = torch.tensor(X_val, dtype=torch.float32, device=device)
-        y_train_t = torch.tensor(y_train, dtype=torch.long, device=device)
-        y_val_np = y_val
-
-        loader = DataLoader(
-            TensorDataset(X_train_t, y_train_t), batch_size=BILSTM_BATCH_SIZE, shuffle=True,
-        )
-
-        for n_epochs in BILSTM_EPOCHS:
-            for hidden_dim in BILSTM_HIDDEN_DIMS:
-                for num_layers in BILSTM_LAYERS:
-                    for lr in BILSTM_LR_LIST:
-                        config_idx += 1
-                        t0 = time.time()
-                        model = BiLSTMClassifier(
-                            input_dim=input_dim,
-                            num_classes=num_classes,
-                            window_size=window_size,
-                            hidden_dim=hidden_dim,
-                            num_layers=num_layers,
-                            dropout=BILSTM_DROPOUT,
-                        ).to(device)
-                        
-                        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
-                        loss_fn = nn.CrossEntropyLoss(weight=class_weights)
-
-                        model.train()
-                        for _ in range(n_epochs):
-                            for X_batch, y_batch in loader:
-                                optimizer.zero_grad()
-                                logits = model(X_batch)
-                                loss = loss_fn(logits, y_batch)
-                                loss.backward()
-                                optimizer.step()
-
-                        model.eval()
-                        with torch.no_grad():
-                            val_logits = model(X_val_t)
-                            y_pred = torch.argmax(F.softmax(val_logits, dim=-1), dim=-1).cpu().numpy()
-                        acc = float(accuracy_score(y_val_np, y_pred))
-                        f1 = float(f1_score(y_val_np, y_pred, average="macro"))
-                        precision = float(precision_score(y_val_np, y_pred, average="macro", zero_division=0))
-
-                        if f1 > best["f1"]:
-                            best = {
-                                "model": "Bi-LSTM", "split": split_label(tr, vr, te),
-                                "param_dict": {
-                                    "epochs": n_epochs,
-                                    "hidden_dim": hidden_dim,
-                                    "num_layers": num_layers,
-                                    "lr": lr,
-                                    "dropout": BILSTM_DROPOUT,
-                                    "window": window_size,
-                                },
-                                "accuracy": acc, "f1": f1, "precision": precision, "auroc": None,
-                                "state_dict": {k: v.cpu().clone() for k, v in model.state_dict().items()},
-                                "scaler": scaler, "split_tuple": (tr, vr, te),
-                            }
-                        print(
-                            f"[{config_idx:>3}/{total}] split={split_label(tr,vr,te):<10} "
-                            f"epochs={n_epochs:<3} h={hidden_dim:<3} layers={num_layers:<3} "
-                            f"lr={lr:<6} acc={acc:.4f} f1={f1:.4f} ({time.time()-t0:.1f}s)"
-                        )
-
-    print(f"--- best Bi-LSTM: {best['split']}  f1={best['f1']:.4f}")
+    for hidden_dim in BILSTM_HIDDEN_DIMS:
+        for num_layers in BILSTM_LAYERS:
+            for lr in BILSTM_LR_LIST:
+                config_idx += 1
+                t0 = time.time()
+                model = BiLSTMClassifier(
+                    input_dim=len(FEATURES), num_classes=num_classes,
+                    window_size=BILSTM_WINDOW_SIZE, hidden_dim=hidden_dim,
+                    num_layers=num_layers, dropout=BILSTM_DROPOUT,
+                ).to(device)
+                state, best_epoch, _ = fit_torch_with_early_stopping(
+                    model, loader, X_val_t, y_val_w,
+                    lr=lr, weight_decay=1e-4, class_weights=weights,
+                    max_epochs=BILSTM_MAX_EPOCHS, patience=BILSTM_PATIENCE,
+                )
+                acc, f1, precision, _ = torch_val_scores(model, X_val_t, y_val_w)
+                if f1 > best["f1"]:
+                    best = {
+                        "model": "Bi-LSTM", "split": SPLIT_DESCRIPTION,
+                        "param": f"hidden={hidden_dim}, layers={num_layers}, "
+                                 f"lr={lr}, best_epoch={best_epoch}",
+                        "param_dict": {
+                            "hidden_dim": hidden_dim, "num_layers": num_layers,
+                            "lr": lr, "epochs": best_epoch,
+                            "max_epochs": BILSTM_MAX_EPOCHS,
+                            "dropout": BILSTM_DROPOUT, "window": BILSTM_WINDOW_SIZE,
+                        },
+                        "accuracy": acc, "f1": f1, "precision": precision,
+                        "auroc": None,
+                        "state_dict": copy.deepcopy(state),
+                        "scaler": scaler,
+                    }
+                print(
+                    f"[{config_idx:>2}/{total}] h={hidden_dim:<4} layers={num_layers} "
+                    f"lr={lr:<6} best_epoch={best_epoch:<3} acc={acc:.4f} f1={f1:.4f} "
+                    f"({time.time()-t0:.1f}s)"
+                )
+    print(f"--- best Bi-LSTM: {best['param']}  f1={best['f1']:.4f}")
     return best, device
+
+
 # ── Saving ─────────────────────────────────────────────────────────────────
 def _final_report(y_true, y_pred, label: str) -> dict[str, float]:
     seen = sorted(set(int(v) for v in list(y_true) + list(y_pred)))
     names = [CLASS_NAMES[i] if 0 <= i < len(CLASS_NAMES) else str(i) for i in seen]
-    print(f"\n=== {label} held-out test set ===")
+    print(f"\n=== {label} — canonical demo holdout ===")
     print(classification_report(y_true, y_pred, labels=seen, target_names=names, zero_division=0))
     return {
         "test_accuracy": float(accuracy_score(y_true, y_pred)),
         "test_f1": float(f1_score(y_true, y_pred, average="macro")),
         "test_precision": float(precision_score(y_true, y_pred, average="macro", zero_division=0)),
     }
+
+
+def _base_metadata(best: dict, family: str, artifact_name: str) -> dict:
+    return {
+        "model_name": artifact_name,
+        "model_family": family,
+        "trained_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "trained_on_dataset": "dtx_ai_master_dataset.csv",
+        "feature_count": len(FEATURES),
+        "num_classes": len(CLASS_NAMES),
+        "feature_order_ref": "services/ai/models/shared/feature_order.json",
+        "class_mapping": {str(i): n for i, n in enumerate(CLASS_NAMES)},
+        "training_split": SPLIT_DESCRIPTION,
+        "best_params": best["param_dict"],
+        "leakage_controls": (
+            "per-episode temporal split with purge gap; demo holdout is the "
+            "future tail of every fault run and is never used in training"
+        ),
+    }
+
+
+def _dump_scaler(out_dir: Path, scaler) -> bool:
+    if scaler is None:
+        return False
+    joblib.dump(scaler, out_dir / "scaler.pkl")
+    return True
 
 
 def save_tree_artifact(best: dict, demo_holdout: pd.DataFrame, out_dir: Path,
@@ -918,17 +770,11 @@ def save_tree_artifact(best: dict, demo_holdout: pd.DataFrame, out_dir: Path,
     test_metrics = _final_report(y_holdout.values, y_pred, family)
 
     joblib.dump(best["model_obj"], out_dir / artifact_name)
+    scaler_saved = _dump_scaler(out_dir, best["scaler"])
     metadata = {
-        "model_name": artifact_name,
-        "model_family": family,
-        "trained_on_dataset": "dtx_ai_master_dataset.csv",
-        "feature_count": len(FEATURES),
-        "num_classes": len(CLASS_NAMES),
-        "feature_order_ref": "services/ai/models/shared/feature_order.json",
-        "scaler_required": best["scaler"] is not None,
-        "class_mapping": {str(i): n for i, n in enumerate(CLASS_NAMES)},
-        "training_split": best["split"],
-        "best_params": best["param_dict"],
+        **_base_metadata(best, family, artifact_name),
+        "scaler_required": scaler_saved,
+        "scaler_path": f"services/ai/models/{out_dir.name}/scaler.pkl" if scaler_saved else None,
         "metrics": {
             "val_accuracy": round(best["accuracy"], 6),
             "val_f1": round(best["f1"], 6),
@@ -939,13 +785,10 @@ def save_tree_artifact(best: dict, demo_holdout: pd.DataFrame, out_dir: Path,
         "decision_type": "multiclass_classifier",
         "default_threshold": None,
         "supports_tree_xai": supports_tree_xai,
-        "notes": (
-            "Trained via scripts/train_models.py with stratified group-aware "
-            "splits when episode/run groups are available."
-        ),
     }
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"[save] {out_dir}/{artifact_name}  +  metadata.json")
+    return test_metrics
 
 
 def save_lstm_artifact(best: dict, device: torch.device, num_classes: int,
@@ -954,8 +797,8 @@ def save_lstm_artifact(best: dict, device: torch.device, num_classes: int,
     out_dir.mkdir(parents=True, exist_ok=True)
     pth_path = out_dir / "best_lstmae.pth"
     torch.save(best["state_dict"], pth_path)
+    _dump_scaler(out_dir, best["scaler"])
 
-    # Reconstruct best model for honest test eval against the demo holdout.
     p = best["param_dict"]
     final_model = LSTMAutoencoderClassifier(
         input_dim=len(FEATURES), hidden_dim=p["hidden"],
@@ -973,19 +816,13 @@ def save_lstm_artifact(best: dict, device: torch.device, num_classes: int,
         recon, holdout_logits = final_model(X_holdout_t)
         y_pred = torch.argmax(F.softmax(holdout_logits, dim=-1), dim=-1).cpu().numpy()
         test_recon_mse = float(torch.mean((recon - X_holdout_t) ** 2).item())
-    test_metrics = _final_report(y_holdout, y_pred, "LSTM-AE+CLS (demo holdout)")
+    test_metrics = _final_report(y_holdout, y_pred, "LSTM-AE+CLS")
 
     metadata = {
-        "model_name": "best_lstmae.pth",
-        "model_family": "lstm_autoencoder_pytorch",
-        "trained_on_dataset": "dtx_ai_master_dataset.csv",
-        "feature_count": len(FEATURES),
-        "num_classes": num_classes,
-        "feature_order_ref": "services/ai/models/shared/feature_order.json",
+        **_base_metadata(best, "lstm_autoencoder_pytorch", "best_lstmae.pth"),
         "scaler_required": True,
+        "scaler_path": "services/ai/models/lstm_ae/scaler.pkl",
         "input_shape": {"batch": "N", "sequence_length": 1, "feature_dim": len(FEATURES)},
-        "class_mapping": {str(i): n for i, n in enumerate(CLASS_NAMES)},
-        "training_split": best["split"],
         "best_params": {
             **best["param_dict"],
             "dropout": LSTM_DROPOUT,
@@ -1000,113 +837,30 @@ def save_lstm_artifact(best: dict, device: torch.device, num_classes: int,
         },
         "decision_type": "multiclass_classifier_with_reconstruction",
         "default_threshold": 0.5,
-        "notes": (
-            "Trained via scripts/train_models.py with stratified group-aware "
-            "splits when episode/run groups are available. Architecture is "
-            "ai.lstm_classifier.LSTMAutoencoderClassifier."
-        ),
     }
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"[save] {pth_path}  +  metadata.json")
+    return test_metrics
 
 
 def save_tabnet_artifact(best: dict, demo_holdout: pd.DataFrame):
     if best.get("skipped"):
-        print(f"[save] TabNet skipped; no artifact written ({best.get('skip_reason', 'unknown reason')})")
-        return
+        print(f"[save] TabNet skipped; no artifact written ({best.get('skip_reason', 'unknown')})")
+        return None
     out_dir = MODELS_ROOT / "tabnet"
     out_dir.mkdir(parents=True, exist_ok=True)
-    
-    X_holdout = demo_holdout[FEATURES].copy()
-    if best["scaler"] is not None:
-        X_holdout = pd.DataFrame(best["scaler"].transform(X_holdout), columns=FEATURES)
-    y_holdout = demo_holdout["fault_label"].astype(int).values
-    
-    try:
-        y_pred = best["model_obj"].predict(X_holdout)
-        test_metrics = _final_report(y_holdout, y_pred, "TabNet (demo holdout)")
-    except Exception as exc:
-        print(f"[save] TabNet demo holdout evaluation skipped due to exception: {exc}")
-        test_metrics = {
-            "test_accuracy": None,
-            "test_f1": None,
-            "test_precision": None,
-        }
-    
-    best["model_obj"].save_model(str(out_dir / "best_tabnet"))
-    artifact_name = "best_tabnet.zip"
-    
-    metadata = {
-        "model_name": artifact_name,
-        "model_family": "tabnet_pytorch",
-        "trained_on_dataset": "dtx_ai_master_dataset.csv",
-        "feature_count": len(FEATURES),
-        "num_classes": len(CLASS_NAMES),
-        "feature_order_ref": "services/ai/models/shared/feature_order.json",
-        "scaler_required": True,
-        "class_mapping": {str(i): n for i, n in enumerate(CLASS_NAMES)},
-        "training_split": best["split"],
-        "best_params": best["param_dict"],
-        "metrics": {
-            "val_accuracy": round(best["accuracy"], 6),
-            "val_f1": round(best["f1"], 6),
-            "val_precision": round(best["precision"], 6),
-            **{k: (None if v is None else round(v, 6)) for k, v in test_metrics.items()},
-        },
-        "decision_type": "multiclass_classifier",
-        "default_threshold": 0.5,
-        "supports_tree_xai": False,
-        "notes": "Trained via scripts/train_models.py (PyTorch TabNet).",
-    }
-    (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
-    print(f"[save] {out_dir}/{artifact_name}  +  metadata.json")
-
-def save_cnn_artifact(best: dict, device: torch.device, num_classes: int,
-                      demo_holdout: pd.DataFrame):
-    out_dir = MODELS_ROOT / "cnn"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    p = best["param_dict"]
-
-    final_model = CNNClassifier(
-        input_dim=len(FEATURES),
-        num_classes=num_classes,
-        window_size=p.get("window", 1),
-        conv_channels=p["conv_channels"],
-        kernel_size=p["kernel_size"],
-        hidden_dim=p["hidden_dim"],
-        dropout=p["dropout"],
-    ).to(device)
-    final_model.load_state_dict(best["state_dict"])
-    final_model.eval()
 
     X_holdout = pd.DataFrame(best["scaler"].transform(demo_holdout[FEATURES]), columns=FEATURES)
-    df_holdout = X_holdout.copy()
-    df_holdout["fault_label"] = demo_holdout["fault_label"].astype(int).values
-    X_holdout_w, y_holdout = engineer_features(
-        df_holdout, window=p["window"], step=5,
-    )
-    X_holdout_t = torch.tensor(X_holdout_w, dtype=torch.float32, device=device)
+    y_holdout = demo_holdout["fault_label"].astype(int).values
+    y_pred = best["model_obj"].predict(X_holdout)
+    test_metrics = _final_report(y_holdout, y_pred, "TabNet")
 
-    with torch.no_grad():
-        holdout_logits = final_model(X_holdout_t)
-        y_pred = torch.argmax(F.softmax(holdout_logits, dim=-1), dim=-1).cpu().numpy()
-
-    test_metrics = _final_report(y_holdout, y_pred, "CNN (demo holdout)")
-
-    pth_path = out_dir / "best_cnn.pth"
-    torch.save(best["state_dict"], pth_path)
-
+    best["model_obj"].save_model(str(out_dir / "best_tabnet"))
+    _dump_scaler(out_dir, best["scaler"])
     metadata = {
-        "model_name": "best_cnn.pth",
-        "model_family": "cnn_pytorch",
-        "trained_on_dataset": "dtx_ai_master_dataset.csv",
-        "feature_count": len(FEATURES),
-        "num_classes": len(CLASS_NAMES),
-        "feature_order_ref": "services/ai/models/shared/feature_order.json",
+        **_base_metadata(best, "tabnet_pytorch", "best_tabnet.zip"),
         "scaler_required": True,
-        "class_mapping": {str(i): n for i, n in enumerate(CLASS_NAMES)},
-        "training_split": best["split"],
-        "best_params": best["param_dict"],
+        "scaler_path": "services/ai/models/tabnet/scaler.pkl",
         "metrics": {
             "val_accuracy": round(best["accuracy"], 6),
             "val_f1": round(best["f1"], 6),
@@ -1116,12 +870,78 @@ def save_cnn_artifact(best: dict, device: torch.device, num_classes: int,
         "decision_type": "multiclass_classifier",
         "default_threshold": 0.5,
         "supports_tree_xai": False,
-        "notes": "Trained via scripts/train_models.py — CNN classifier saved as ai.cnn_classifier.CNNClassifier.",
     }
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
-    print(f"[save] {pth_path}  +  metadata.json")
-    
-def save_bilstm_artifact(best: dict, device: torch.device, num_classes: int, demo_holdout: pd.DataFrame):
+    print(f"[save] {out_dir}/best_tabnet.zip  +  metadata.json")
+    return test_metrics
+
+
+def _windowed_holdout_eval(model, scaler, demo_holdout: pd.DataFrame,
+                           window: int, device: torch.device):
+    """Score a windowed torch model on the demo holdout, windows per episode."""
+    scaled = pd.DataFrame(scaler.transform(demo_holdout[FEATURES]), columns=FEATURES)
+    scaled["fault_label"] = demo_holdout["fault_label"].astype(int).values
+    scaled["_g"] = episode_groups(demo_holdout).astype(str).values
+    xs, ys = [], []
+    for _, seg in scaled.groupby("_g", sort=False):
+        seg = seg.drop(columns=["_g"])
+        if len(seg) < window:
+            continue
+        X_w, y_w = engineer_features(seg, window=window, step=WINDOW_STEP)
+        if len(X_w):
+            xs.append(X_w)
+            ys.append(y_w)
+    X_holdout_w = np.concatenate(xs, axis=0)
+    y_holdout = np.concatenate(ys, axis=0)
+    X_t = torch.tensor(X_holdout_w, dtype=torch.float32, device=device)
+    with torch.no_grad():
+        y_pred = torch.argmax(F.softmax(model(X_t), dim=-1), dim=-1).cpu().numpy()
+    return y_holdout, y_pred
+
+
+def save_cnn_artifact(best: dict, device: torch.device, num_classes: int,
+                      demo_holdout: pd.DataFrame):
+    out_dir = MODELS_ROOT / "cnn"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    p = best["param_dict"]
+
+    final_model = CNNClassifier(
+        input_dim=len(FEATURES), num_classes=num_classes,
+        window_size=p["window"], conv_channels=p["conv_channels"],
+        kernel_size=p["kernel_size"], hidden_dim=p["hidden_dim"],
+        dropout=p["dropout"],
+    ).to(device)
+    final_model.load_state_dict(best["state_dict"])
+    final_model.eval()
+
+    y_holdout, y_pred = _windowed_holdout_eval(
+        final_model, best["scaler"], demo_holdout, p["window"], device,
+    )
+    test_metrics = _final_report(y_holdout, y_pred, "CNN")
+
+    torch.save(best["state_dict"], out_dir / "best_cnn.pth")
+    _dump_scaler(out_dir, best["scaler"])
+    metadata = {
+        **_base_metadata(best, "cnn_pytorch", "best_cnn.pth"),
+        "scaler_required": True,
+        "scaler_path": "services/ai/models/cnn/scaler.pkl",
+        "metrics": {
+            "val_accuracy": round(best["accuracy"], 6),
+            "val_f1": round(best["f1"], 6),
+            "val_precision": round(best["precision"], 6),
+            **{k: round(v, 6) for k, v in test_metrics.items()},
+        },
+        "decision_type": "multiclass_classifier",
+        "default_threshold": 0.5,
+        "supports_tree_xai": False,
+    }
+    (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    print(f"[save] {out_dir}/best_cnn.pth  +  metadata.json")
+    return test_metrics
+
+
+def save_bilstm_artifact(best: dict, device: torch.device, num_classes: int,
+                         demo_holdout: pd.DataFrame):
     out_dir = MODELS_ROOT / "bilstm"
     out_dir.mkdir(parents=True, exist_ok=True)
     p = best["param_dict"]
@@ -1133,50 +953,190 @@ def save_bilstm_artifact(best: dict, device: torch.device, num_classes: int, dem
     final_model.load_state_dict(best["state_dict"])
     final_model.eval()
 
-    X_holdout = pd.DataFrame(best["scaler"].transform(demo_holdout[FEATURES]), columns=FEATURES)
-    df_holdout = X_holdout.copy()
-    df_holdout["fault_label"] = demo_holdout["fault_label"].astype(int).values
-    X_holdout_w, y_holdout = engineer_features(df_holdout, window=p["window"], step=5)
-    X_holdout_t = torch.tensor(X_holdout_w, dtype=torch.float32, device=device)
+    y_holdout, y_pred = _windowed_holdout_eval(
+        final_model, best["scaler"], demo_holdout, p["window"], device,
+    )
+    test_metrics = _final_report(y_holdout, y_pred, "Bi-LSTM")
 
-    with torch.no_grad():
-        y_pred = torch.argmax(F.softmax(final_model(X_holdout_t), dim=-1), dim=-1).cpu().numpy()
-
-    test_metrics = _final_report(y_holdout, y_pred, "Bi-LSTM (demo holdout)")
-
-    pth_path = out_dir / "best_bilstm.pth"
-    torch.save(best["state_dict"], pth_path)
-
+    torch.save(best["state_dict"], out_dir / "best_bilstm.pth")
+    _dump_scaler(out_dir, best["scaler"])
     metadata = {
-        "model_name": "best_bilstm.pth",
-        "model_family": "bilstm_pytorch",
-        "feature_count": len(FEATURES),
-        "num_classes": num_classes,
+        **_base_metadata(best, "bilstm_pytorch", "best_bilstm.pth"),
         "scaler_required": True,
-        "training_split": best["split"],
-        "best_params": p,
-        "metrics": {"val_f1": round(best["f1"], 6), **{k: round(v, 6) for k, v in test_metrics.items()}},
+        "scaler_path": "services/ai/models/bilstm/scaler.pkl",
+        "metrics": {
+            "val_accuracy": round(best["accuracy"], 6),
+            "val_f1": round(best["f1"], 6),
+            "val_precision": round(best["precision"], 6),
+            **{k: round(v, 6) for k, v in test_metrics.items()},
+        },
+        "decision_type": "multiclass_classifier",
+        "default_threshold": 0.5,
+        "supports_tree_xai": False,
     }
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
-    print(f"[save] {pth_path}  +  metadata.json")
+    print(f"[save] {out_dir}/best_bilstm.pth  +  metadata.json")
+    return test_metrics
 
 
-# ── Notebook cell 11: Global Leaderboard & Retrain ─────────────────────────
-def save_overall_best(
-    best_rf,
-    best_lgbm,
-    best_xgb,
-    best_tabnet,
-    best_cnn,
-    best_bilstm,
-    best_lstm,
-    X,
-    y,
-    groups: pd.Series | None,
-    demo_holdout: pd.DataFrame,
-    device: torch.device,
-):
-    # 1. Gather all candidates
+# ── Notebook CELL 13: Global Leaderboard & winner retrain ──────────────────
+def save_overall_best(candidates: dict, splits: dict, device: torch.device):
+    records = []
+    for name, b in candidates.items():
+        if b and b.get("f1", -1.0) >= 0:
+            records.append({
+                "model": name,
+                "val_f1": b.get("f1", 0.0),
+                "val_accuracy": b.get("accuracy", 0.0),
+                "holdout_f1": (b.get("test_metrics") or {}).get("test_f1"),
+                "holdout_accuracy": (b.get("test_metrics") or {}).get("test_accuracy"),
+            })
+    # mergesort = stable, so val-F1 ties resolve to the earlier candidate
+    # (fixed dict order) instead of an arbitrary quicksort permutation.
+    results_df = (
+        pd.DataFrame(records)
+        .sort_values(by=["val_f1", "val_accuracy"], ascending=False, kind="mergesort")
+        .reset_index(drop=True)
+    )
+    print("\n" + "=" * 70)
+    print("FULL RESULTS TABLE (LEADERBOARD — selected on val, reported on holdout)")
+    print("=" * 70)
+    print(results_df.to_string(index=False))
+
+    overall_name = results_df.iloc[0]["model"]
+    overall = candidates[overall_name]
+    print(f"\n=== Global Winner: {overall_name} (val F1: {overall['f1']:.4f}) ===")
+
+    SHARED_DIR.mkdir(parents=True, exist_ok=True)
+    # Remove every stale winner artifact first — a .pkl from a previous tree
+    # winner must not survive next to this run's .pth (and vice versa).
+    for stale in ("model_best.pkl", "model_best.pth", "model_best.zip"):
+        (SHARED_DIR / stale).unlink(missing_ok=True)
+    (SHARED_DIR / "feature_order.json").write_text(json.dumps(FEATURES, indent=2) + "\n")
+    (SHARED_DIR / "leaderboard.json").write_text(
+        json.dumps({
+            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "split": SPLIT_DESCRIPTION,
+            "winner": overall_name,
+            "results": records,
+        }, indent=2) + "\n"
+    )
+
+    pool = splits["pool"]
+    demo_holdout = splits["demo_holdout"]
+    y_pool = pool["fault_label"].astype(int)
+    p = overall["param_dict"]
+
+    if overall_name in ("LightGBM", "XGBoost"):
+        # Retrain on the full pool with the early-stopped round count.
+        rounds = int(p.get("best_rounds", 200))
+        if overall_name == "LightGBM":
+            final_model = lgb.LGBMClassifier(
+                n_estimators=rounds, max_depth=p["max_depth"],
+                num_leaves=p["num_leaves"], learning_rate=p["learning_rate"],
+                random_state=RANDOM_STATE, class_weight="balanced", verbose=-1,
+            )
+            final_model.fit(pool[FEATURES], y_pool)
+        else:
+            final_model = xgb.XGBClassifier(
+                n_estimators=rounds, max_depth=p["max_depth"],
+                learning_rate=p["learning_rate"], random_state=RANDOM_STATE,
+                eval_metric="mlogloss", verbosity=0,
+            )
+            final_model.fit(pool[FEATURES], y_pool,
+                            sample_weight=compute_sample_weight("balanced", y_pool))
+        joblib.dump(final_model, SHARED_DIR / "model_best.pkl")
+        # The winner consumes raw features; keep a reference pipeline anyway so
+        # shared/scaler.pkl can never go stale relative to model_best.
+        reference_scaler = build_scaling_pipeline().fit(pool[FEATURES])
+        joblib.dump(reference_scaler, SHARED_DIR / "scaler.pkl")
+        X_holdout_eval = demo_holdout[FEATURES]
+        y_pred = final_model.predict(X_holdout_eval)
+
+    elif overall_name == "RandomForest":
+        final_model = RandomForestClassifier(
+            n_estimators=p["n_estimators"], max_depth=p["max_depth"],
+            random_state=RANDOM_STATE, class_weight="balanced", n_jobs=-1,
+        )
+        scaler = build_scaling_pipeline()
+        X_pool_s = pd.DataFrame(scaler.fit_transform(pool[FEATURES]), columns=FEATURES)
+        final_model.fit(X_pool_s, y_pool)
+        joblib.dump(final_model, SHARED_DIR / "model_best.pkl")
+        joblib.dump(scaler, SHARED_DIR / "scaler.pkl")
+        X_holdout_eval = pd.DataFrame(scaler.transform(demo_holdout[FEATURES]), columns=FEATURES)
+        y_pred = final_model.predict(X_holdout_eval)
+
+    else:
+        # Torch/TabNet winners: reuse the per-family sweep artifact (no pool
+        # retrain — early-stopped epoch counts don't transfer cleanly), but
+        # mirror the winner's scaler + artifact into shared/.
+        if overall.get("scaler") is not None:
+            joblib.dump(overall["scaler"], SHARED_DIR / "scaler.pkl")
+        if overall_name == "TabNet":
+            import shutil
+            src = MODELS_ROOT / "tabnet" / "best_tabnet.zip"
+            if src.exists():
+                shutil.copyfile(src, SHARED_DIR / "model_best.zip")
+        else:
+            torch.save(overall["state_dict"], SHARED_DIR / "model_best.pth")
+        print(f"[{overall_name}] sweep artifact mirrored into shared/.")
+        return overall_name
+
+    _final_report(
+        demo_holdout["fault_label"].astype(int).values, y_pred,
+        f"model_best ({overall_name}, retrained on full pool)",
+    )
+    print(f"[save] {SHARED_DIR}/model_best.*  +  scaler.pkl  +  feature_order.json")
+    return overall_name
+
+
+# ── orchestration ──────────────────────────────────────────────────────────
+def main():
+    print(f"[env] python={sys.version.split()[0]} torch={torch.__version__} cuda={torch.cuda.is_available()}")
+    print(f"[data] loading {AI_ROOT}/dtx_ai_master_dataset.csv")
+    df = load_data(str(AI_ROOT / "dtx_ai_master_dataset.csv"))
+
+    splits = prepare_canonical_splits(df)
+    print(
+        f"[data] split={SPLIT_DESCRIPTION}\n"
+        f"[data] train={splits['train'].shape}  val={splits['val'].shape}  "
+        f"demo_holdout={splits['demo_holdout'].shape}\n"
+        f"[data] holdout distribution: "
+        f"{splits['demo_holdout']['fault_label'].value_counts().sort_index().to_dict()}"
+    )
+    num_classes = len(CLASS_NAMES)
+
+    run_sanity_baselines(splits["pool"], splits["demo_holdout"])
+
+    demo_holdout = splits["demo_holdout"]
+
+    best_rf = sweep_random_forest(splits)
+    best_rf["test_metrics"] = save_tree_artifact(
+        best_rf, demo_holdout, MODELS_ROOT / "random_forest", "best_rf.pkl",
+        "random_forest", supports_tree_xai=True)
+
+    best_lgbm = sweep_lightgbm(splits)
+    best_lgbm["test_metrics"] = save_tree_artifact(
+        best_lgbm, demo_holdout, MODELS_ROOT / "lightgbm", "best_lgbm.pkl",
+        "lightgbm", supports_tree_xai=True)
+
+    best_xgb = sweep_xgboost(splits)
+    best_xgb["test_metrics"] = save_tree_artifact(
+        best_xgb, demo_holdout, MODELS_ROOT / "xgboost", "best_xgb.pkl",
+        "xgboost", supports_tree_xai=True)
+
+    best_tabnet = sweep_tabnet(splits)
+    best_tabnet["test_metrics"] = save_tabnet_artifact(best_tabnet, demo_holdout)
+
+    best_cnn, device = sweep_cnn(splits, num_classes)
+    best_cnn["test_metrics"] = save_cnn_artifact(best_cnn, device, num_classes, demo_holdout)
+
+    best_bilstm, device = sweep_bilstm(splits, num_classes)
+    best_bilstm["test_metrics"] = save_bilstm_artifact(best_bilstm, device, num_classes, demo_holdout)
+
+    best_lstm, device = sweep_lstm_ae(splits, num_classes)
+    best_lstm["test_metrics"] = save_lstm_artifact(best_lstm, device, num_classes, demo_holdout)
+
     candidates = {
         "RandomForest": best_rf,
         "LightGBM": best_lgbm,
@@ -1186,253 +1146,9 @@ def save_overall_best(
         "Bi-LSTM": best_bilstm,
         "LSTM-AE": best_lstm,
     }
-    
-    # 2. Build and print the leaderboard
-    records = []
-    for name, b in candidates.items():
-        if b and "f1" in b:
-            records.append({
-                "model": name,
-                "split": b.get("split", "N/A"),
-                "accuracy": b.get("accuracy", 0.0),
-                "f1": b.get("f1", 0.0),
-                "precision": b.get("precision", 0.0)
-            })
-    
-    results_df = pd.DataFrame(records).sort_values(by="f1", ascending=False).reset_index(drop=True)
-    print("\n" + "="*70)
-    print("FULL RESULTS TABLE (LEADERBOARD)")
-    print("="*70)
-    print(results_df.to_string(index=False))
+    save_overall_best(candidates, splits, device)
 
-    # 3. Pick Global Winner
-    overall_name = results_df.iloc[0]["model"]
-    overall = candidates[overall_name]
-    print(f"\n=== Global Winner: {overall_name} (F1: {overall['f1']:.4f}) ===")
-    
-    if overall_name in ["TabNet", "LSTM-AE"]:
-        # No train+val retraining for these two; the per-family save_*_artifact step
-        # already wrote the best model. Still mirror the winner's scaler and
-        # feature_order into shared/ (the runtime loader reads from there), plus
-        # a convenience copy of the model artifact under shared/model_best.*.
-        SHARED_DIR.mkdir(parents=True, exist_ok=True)
-        winner_scaler = overall.get("scaler")
-        if winner_scaler is not None:
-            joblib.dump(winner_scaler, SHARED_DIR / "scaler.pkl")
-        (SHARED_DIR / "feature_order.json").write_text(json.dumps(FEATURES, indent=2) + "\n")
-
-        if overall_name == "TabNet":
-            import shutil
-            src = MODELS_ROOT / "tabnet" / "best_tabnet.zip"
-            if src.exists():
-                shutil.copyfile(src, SHARED_DIR / "model_best.zip")
-            print(f"[save] {SHARED_DIR}/model_best.zip  +  scaler.pkl  +  feature_order.json")
-        else:  # LSTM-AE
-            torch.save(overall["state_dict"], SHARED_DIR / "model_best.pth")
-            print(f"[save] {SHARED_DIR}/model_best.pth  +  scaler.pkl  +  feature_order.json")
-
-        print(f"[{overall_name}] No train+val retrain — sweep artifact reused for shared/.")
-        return overall_name
-
-    tr, vr, te = overall["split_tuple"]
-    p = overall["param_dict"]
-    
-    needs_windows = overall_name in ["CNN", "Bi-LSTM"]
-    needs_scaler = overall_name in ["RandomForest", "CNN", "Bi-LSTM"]
-
-    window_size = p.get("window", 30) if needs_windows else 0
-    X_train, X_val, X_test, y_train, y_val, y_test, scaler = prepare_splits(
-        X, y, tr, vr, te, scale_and_impute=needs_scaler, window=window_size, groups=groups,
-    )
-
-    # 4. Retrain Global Winner on Train+Val
-    if not needs_windows:
-        X_final = pd.concat([X_train, X_val])
-        y_final = pd.concat([y_train, y_val])
-        
-        if overall_name == "RandomForest":
-            final_model = RandomForestClassifier(
-                n_estimators=p["n_estimators"], max_depth=p["max_depth"],
-                random_state=RANDOM_STATE, class_weight="balanced",
-            )
-        elif overall_name == "LightGBM":
-            final_model = lgb.LGBMClassifier(
-                n_estimators=p["n_estimators"], max_depth=p["max_depth"],
-                learning_rate=p["learning_rate"],
-                random_state=RANDOM_STATE, class_weight="balanced", verbose=-1,
-            )
-        else: # XGBoost
-            final_model = xgb.XGBClassifier(
-                n_estimators=p["n_estimators"], max_depth=p["max_depth"],
-                learning_rate=p["learning_rate"],
-                random_state=RANDOM_STATE, eval_metric="mlogloss", verbosity=0,
-            )
-            
-        print(f"Re-training {overall_name} on Train+Val data...")
-        final_model.fit(X_final, y_final)
-        
-        SHARED_DIR.mkdir(parents=True, exist_ok=True)
-        joblib.dump(final_model, SHARED_DIR / "model_best.pkl")
-        if scaler is not None:
-            joblib.dump(scaler, SHARED_DIR / "scaler.pkl")
-        (SHARED_DIR / "feature_order.json").write_text(json.dumps(FEATURES, indent=2) + "\n")
-        print(f"[save] {SHARED_DIR}/model_best.pkl  +  (scaler if required)  +  feature_order.json")
-        
-        # Final eval against the canonical demo holdout
-        if scaler is not None:
-            X_holdout_scaled = pd.DataFrame(scaler.transform(demo_holdout[FEATURES]), columns=FEATURES)
-        else:
-            X_holdout_scaled = demo_holdout[FEATURES].copy()
-            
-        y_holdout = demo_holdout["fault_label"].astype(int)
-        y_holdout_pred = final_model.predict(X_holdout_scaled)
-        _final_report(
-            y_holdout.values, y_holdout_pred,
-            f"model_best.pkl ({overall_name}, retrained on train+val, scored on demo holdout)",
-        )
-
-    else:
-        # Re-train CNN or Bi-LSTM
-        X_final_w = np.concatenate([X_train, X_val], axis=0)
-        y_final_w = np.concatenate([y_train, y_val], axis=0)
-        num_classes = len(np.unique(y_final_w))
-
-        if overall_name == "CNN":
-            final_model = CNNClassifier(
-                input_dim=len(FEATURES), num_classes=num_classes, window_size=window_size,
-                conv_channels=p["conv_channels"], kernel_size=p["kernel_size"],
-                hidden_dim=p["hidden_dim"], dropout=p["dropout"],
-            ).to(device)
-            epochs = p.get("epochs", 100)
-            lr = p.get("lr", 0.005)
-            batch_size = p.get("batch_size", 64)
-        else:
-            final_model = BiLSTMClassifier(
-                input_dim=len(FEATURES), num_classes=num_classes, window_size=window_size,
-                hidden_dim=p["hidden_dim"], num_layers=p["num_layers"], dropout=p["dropout"],
-            ).to(device)
-            epochs = int(p.get("epochs", 100))
-            lr = p.get("lr", 0.005)
-            batch_size = 64
-
-        final_classes = np.unique(y_final_w)
-        final_weights = compute_class_weight("balanced", classes=final_classes, y=y_final_w)
-        final_weights_t = torch.tensor(final_weights, dtype=torch.float32, device=device)
-
-        optimizer = torch.optim.Adam(final_model.parameters(), lr=lr)
-        criterion = nn.CrossEntropyLoss(weight=final_weights_t)
-
-        X_final_t = torch.tensor(X_final_w, dtype=torch.float32, device=device)
-        y_final_t = torch.tensor(y_final_w, dtype=torch.long, device=device)
-
-        final_ds = TensorDataset(X_final_t, y_final_t)
-        final_loader = DataLoader(final_ds, batch_size=batch_size, shuffle=True)
-
-        print(f"Re-training {overall_name} on Train+Val data ({epochs} epochs)...")
-        final_model.train()
-        for _ in range(epochs):
-            for xb, yb in final_loader:
-                optimizer.zero_grad()
-                loss = criterion(final_model(xb), yb)
-                loss.backward()
-                optimizer.step()
-
-        SHARED_DIR.mkdir(parents=True, exist_ok=True)
-        torch.save(final_model.state_dict(), SHARED_DIR / "model_best.pth")
-        if scaler is not None:
-            joblib.dump(scaler, SHARED_DIR / "scaler.pkl")
-        (SHARED_DIR / "feature_order.json").write_text(json.dumps(FEATURES, indent=2) + "\n")
-        print(f"[save] {SHARED_DIR}/model_best.pth  +  (scaler if required)  +  feature_order.json")
-        
-        final_model.eval()
-        X_holdout = pd.DataFrame(scaler.transform(demo_holdout[FEATURES]), columns=FEATURES)
-        df_holdout = X_holdout.copy()
-        df_holdout["fault_label"] = demo_holdout["fault_label"].astype(int).values
-        X_holdout_w, y_holdout = engineer_features(df_holdout, window=window_size, step=5)
-        X_holdout_t = torch.tensor(X_holdout_w, dtype=torch.float32, device=device)
-        with torch.no_grad():
-            y_pred = torch.argmax(F.softmax(final_model(X_holdout_t), dim=-1), dim=-1).cpu().numpy()
-        _final_report(
-            y_holdout, y_pred,
-            f"model_best.pth ({overall_name}, retrained on train+val, scored on demo holdout)",
-        )
-
-    return overall_name
-
-
-# ── orchestration ──────────────────────────────────────────────────────────
-def main():
-    print(f"[env] python={sys.version.split()[0]} torch={torch.__version__} cuda={torch.cuda.is_available()}")
-    print(f"[data] loading {AI_ROOT}/dtx_ai_master_dataset.csv")
-    df = load_data(str(AI_ROOT / "dtx_ai_master_dataset.csv"))
-    df = engineer_features(df)
-
-    # Carve out the canonical 20% holdout. When the fixed dataset provides an
-    # episode/run identifier, hold out complete episodes; otherwise preserve the
-    # legacy stratified row-level demo holdout for the current CSV.
-    source_episode_column = find_episode_column(df)
-    if source_episode_column is not None:
-        training_pool, demo_holdout = split_episode_pool_and_holdout(df)
-        holdout_mode = f"episode ({source_episode_column})"
-    else:
-        training_pool, demo_holdout = split_training_pool_and_holdout(df)
-        holdout_mode = "row-stratified"
-    print(
-        f"[data] training_pool={training_pool.shape}  demo_holdout={demo_holdout.shape}  "
-        f"holdout_mode={holdout_mode}  "
-        f"(holdout distribution: {demo_holdout['fault_label'].value_counts().sort_index().to_dict()})"
-    )
-
-    X = training_pool[FEATURES]
-    y = training_pool["fault_label"].astype(int)
-    num_classes = int(y.nunique())
-    print(f"[data] using training pool {training_pool.shape}, {num_classes} classes, "
-          f"distribution: {y.value_counts().sort_index().to_dict()}")
-    groups = episode_groups(training_pool)
-    episode_column = find_episode_column(training_pool)
-    group_source = episode_column or "derived contiguous fault-label runs"
-    print(
-        f"[data] split groups={groups.nunique()} source={group_source}; "
-        "sweeps are stratified by group labels when possible"
-    )
-
-    run_sanity_baselines(training_pool, demo_holdout)
-
-    # Cells 5/6/7 — independent per-model sweeps.
-    best_rf = sweep_random_forest(X, y, groups)
-    best_lgbm = sweep_lightgbm(X, y, groups)
-    best_xgb = sweep_xgboost(X, y, groups)
-
-    save_tree_artifact(best_rf, demo_holdout, MODELS_ROOT / "random_forest", "best_rf.pkl",
-                       "random_forest", supports_tree_xai=True)
-    save_tree_artifact(best_lgbm, demo_holdout, MODELS_ROOT / "lightgbm", "best_lgbm.pkl",
-                       "lightgbm", supports_tree_xai=True)
-    save_tree_artifact(best_xgb, demo_holdout, MODELS_ROOT / "xgboost", "best_xgb.pkl",
-                       "xgboost", supports_tree_xai=True)
-
-    # TabNet sweep.
-    best_tabnet = sweep_tabnet(X, y, groups)
-    save_tabnet_artifact(best_tabnet, demo_holdout)
-
-    # CNN sweep.
-    best_cnn, device = sweep_cnn(X, y, num_classes, groups)
-    save_cnn_artifact(best_cnn, device, num_classes, demo_holdout)
-
-    # Bi-LSTM sweep.
-    best_bilstm, device = sweep_bilstm(X, y, num_classes, groups)
-    save_bilstm_artifact(best_bilstm, device, num_classes, demo_holdout)
-
-    # Cell 7 — LSTM-AE+CLS sweep.
-    best_lstm, device = sweep_lstm_ae(X, y, num_classes, groups)
-    save_lstm_artifact(best_lstm, device, num_classes, demo_holdout)
-
-    # Cell 11 — Global Leaderboard & Retrain.
-    save_overall_best(
-        best_rf, best_lgbm, best_xgb, best_tabnet, best_cnn, best_bilstm, best_lstm,
-        X, y, groups, demo_holdout, device
-    )
-
-    print("\n[done] all artifacts retrained against current sklearn/lightgbm/xgboost/torch versions.")
+    print("\n[done] all artifacts retrained with the leakage-safe canonical split.")
 
 
 if __name__ == "__main__":
