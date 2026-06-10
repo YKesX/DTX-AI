@@ -56,3 +56,38 @@ def notify(update) -> None:
         _logger.warning("Isaac Sim scene module unavailable — install Isaac Sim to enable.")
     except Exception as exc:
         _logger.error("Failed to update Isaac Sim scene: %s", exc)
+
+
+def move_entity(pos) -> None:
+    """
+    Receive a PositionUpdate and move the entity in the Isaac Sim scene.
+    pos: PositionUpdate schema object from packages/shared.
+    """
+    _logger.info(
+        "PositionUpdate received | entity=%s type=%s x=%.2f y=%.2f z=%.2f heading=%.1f",
+        pos.entity_id,
+        pos.entity_type,
+        pos.x,
+        pos.y,
+        pos.z,
+        pos.heading,
+    )
+
+    if not _ENABLED:
+        _logger.debug("Isaac Sim disabled — skipping entity move.")
+        return
+
+    try:
+        from sim.scene import move_entity_in_scene  # type: ignore[import]
+        move_entity_in_scene(
+            entity_id=pos.entity_id,
+            entity_type=pos.entity_type,
+            x=pos.x,
+            y=pos.y,
+            z=pos.z,
+            heading=pos.heading,
+        )
+    except ImportError:
+        _logger.warning("Isaac Sim scene module unavailable.")
+    except Exception as exc:
+        _logger.error("Failed to move entity in Isaac Sim: %s", exc)
