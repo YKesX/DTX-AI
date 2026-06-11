@@ -23,6 +23,10 @@ pytorch-tabnet>=4.1.0
 # XAI
 shap>=0.45
 
+# T5
+transformers>=4.40.0
+sentencepiece>=0.1.99
+
 # Plotting (notebook + training script reports)
 matplotlib==3.10.9
 
