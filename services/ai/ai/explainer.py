@@ -159,6 +159,27 @@ def explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
             return _fallback_explain(event, anomaly)
 
     if runtime.available and runtime.family == "lstm_autoencoder_pytorch":
+        # Prefer the fine-tuned T5 explanation. It returns None when the model
+        # is unavailable (weights live outside git) or anything fails, in which
+        # case we fall back to the template summary below — so this branch keeps
+        # working with or without the T5 model present.
+        try:
+            from ai.t5_inference import generate_explanation as _t5_explain
+ 
+            t5_text = _t5_explain(event, anomaly)
+        except Exception:
+            t5_text = None
+ 
+        if t5_text:
+            return ExplanationResult(
+                event_id=event.event_id,
+                summary=t5_text,
+                contributing_features={},
+                recommendation=_RECOMMENDATIONS.get(
+                    anomaly.anomaly_type.value, _RECOMMENDATIONS["unknown"],
+                ),
+            )
+ 
         summary = (
             f"LSTM-AE runtime used for asset '{event.asset_id}'. "
             f"Predicted class={anomaly.anomaly_type.value}, "
@@ -172,5 +193,5 @@ def explain(event: EventIn, anomaly: AnomalyResult) -> ExplanationResult:
                 anomaly.anomaly_type.value, _RECOMMENDATIONS["unknown"],
             ),
         )
-
+ 
     return _fallback_explain(event, anomaly)

@@ -57,3 +57,7 @@ slnx.sqlite
 
 # OS
 Thumbs.db
+
+# T5 
+services/ai/ai/models/t5_explainer/
+services/ai/ai/models/t5_explainer*/
