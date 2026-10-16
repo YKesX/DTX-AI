@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { mockEvents } from '../lib/mockData';
-import { normalizeAlert, normalizeAlerts } from '../lib/normalizeAlert';
+import { normalizeAlert } from '../lib/normalizeAlert';
 
 export function useWebSocket(url = null) {
   const [events, setEvents] = useState([]);
@@ -44,9 +43,8 @@ export function useWebSocket(url = null) {
 
   useEffect(() => {
     if (!url) {
-      // Mock mode — normalise mock data so it uses the same view-model shape
-      setEvents(normalizeAlerts(mockEvents));
-      setStatus('connected');
+      setEvents([]);
+      setStatus('disconnected');
       return;
     }
 

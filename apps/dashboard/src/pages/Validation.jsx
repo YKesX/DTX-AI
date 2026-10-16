@@ -59,10 +59,11 @@ export default function Validation() {
   );
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold text-white">AI Validation</h1>
-        <p className="mt-1 text-sm text-gray-400">
+    <div className="space-y-6">
+      <div className="page-heading">
+        <p className="eyebrow">DTX-AI / Model performance</p>
+        <h1>AI Validation</h1>
+        <p className="mt-1 text-sm text-muted">
           Replay-mode performance, class distributions, and model behavior
         </p>
       </div>
@@ -74,23 +75,23 @@ export default function Validation() {
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[2fr,1fr]">
         <ClassDistributionCharts metrics={metrics} />
         <Card className="p-5">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-200">
+          <h2 className="section-title">
             Model Usage
           </h2>
-          <p className="mt-1 text-sm text-gray-400">
+          <p className="mt-1 text-sm text-muted">
             Number of events processed by each model during replay
           </p>
           <div className="mt-4 space-y-3">
             {modelCounts.length === 0 ? (
-              <p className="text-sm text-gray-500">No model data yet.</p>
+              <p className="text-sm text-dim">No model data yet.</p>
             ) : (
               modelCounts.map(([modelKey, count]) => (
                 <div
                   key={modelKey}
                   className="control-panel-muted flex items-center justify-between rounded-2xl px-4 py-3"
                 >
-                  <span className="text-sm text-gray-300">{modelKey}</span>
-                  <span className="text-lg font-semibold text-white">{count}</span>
+                  <span className="text-sm text-muted">{modelKey}</span>
+                  <span className="text-lg font-semibold text-ink">{count}</span>
                 </div>
               ))
             )}

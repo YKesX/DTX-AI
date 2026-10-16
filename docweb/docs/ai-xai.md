@@ -177,4 +177,4 @@ The training methodology (shared by all 7 families):
 
 The run also writes `shared/leaderboard.json` (val/holdout metrics per family + the global winner), `shared/sanity_baselines.json` (ANOVA feature ranking + trivial-baseline scores), and the winner checkpoint `shared/model_best.pth` (currently the CNN). GPU is used automatically for the torch models if a CUDA-capable device is present.
 
-[`services/ai/dtxai_model_training.ipynb`](https://github.com/YKesX/DTX-AI/blob/main/services/ai/dtxai_model_training.ipynb) is a cell-for-cell mirror of the script and is **generated** from it by `scripts/gen_training_notebook.py` — regenerate it after changing the script; never hand-edit the notebook.
+[`services/ai/dtxai_model_training.ipynb`](https://github.com/YKesX/DTX-AI/blob/main/services/ai/dtxai_model_training.ipynb) is retained as a training experiment record. Use `scripts/train_models.py` as the canonical retraining entry point.

@@ -5,7 +5,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 const config: Config = {
   title: 'DTX-AI',
   tagline: 'Smart Warehouse Anomaly Detection with Explainable AI',
-  favicon: 'img/favicon.ico',
+  favicon: 'img/logo.svg',
 
   url: 'https://YKesX.github.io',
   baseUrl: '/DTX-AI/',
@@ -69,7 +69,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `© ${new Date().getFullYear()} DTX-AI — Atılım University Computer Engineering Graduation Project`,
+      copyright: `© ${new Date().getFullYear()} DTX-AI v3.0 Final — Atılım University Computer Engineering Graduation Project`,
     },
     prism: {
       theme: prismThemes.github,

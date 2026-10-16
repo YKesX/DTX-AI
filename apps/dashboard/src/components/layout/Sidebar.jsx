@@ -10,15 +10,15 @@ const navItems = [
 
 export default function Sidebar() {
   return (
-    <aside className="fixed left-0 top-0 z-30 flex h-screen w-56 flex-col border-r border-white/10 bg-[rgba(10,15,21,0.9)] backdrop-blur-2xl">
-      <div className="border-b border-white/10 px-5 py-5">
+    <aside className="app-sidebar fixed left-0 top-0 z-30 flex h-screen w-56 flex-col border-r border-line">
+      <div className="sidebar-brand flex border-b border-line px-5 py-5">
         <div className="mb-1 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/15 bg-white/8 shadow-[inset_0_1px_0_rgba(255,255,255,0.16)] backdrop-blur-xl">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-line bg-paper shadow-none backdrop-blur-xl">
             <Warehouse className="h-6 w-6 shrink-0 text-[var(--accent-cyan)]" />
           </div>
-          <div>
-            <span className="block text-lg font-bold tracking-tight text-white">DTX-AI</span>
-            <span className="text-[10px] uppercase tracking-[0.24em] text-gray-500">
+          <div className="sidebar-copy">
+            <span className="block font-serif text-2xl font-semibold tracking-tight text-ink">DTX-AI</span>
+            <span className="text-[10px] uppercase tracking-[0.24em] text-dim">
               Control Room
             </span>
           </div>
@@ -30,24 +30,26 @@ export default function Sidebar() {
           <NavLink
             key={to}
             to={to}
+            aria-label={label}
+            title={label}
             end={to === '/'}
             className={({ isActive }) =>
-              `flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium transition-all ${
+              `sidebar-link flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium transition-all ${
                 isActive
-                  ? 'border border-[rgba(140,241,222,0.16)] bg-[rgba(255,255,255,0.06)] text-[rgba(229,255,248,0.96)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
-                  : 'text-gray-400 hover:border hover:border-white/10 hover:bg-white/6 hover:text-white'
+                  ? 'active'
+                  : 'text-muted'
               }`
             }
           >
             <Icon className="w-4 h-4 shrink-0" />
-            {label}
+            <span className="sidebar-copy">{label}</span>
           </NavLink>
         ))}
       </nav>
 
-      <div className="border-t border-white/10 px-5 py-4 text-xs text-gray-600">
-        <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500">DTX-AI Console</div>
-        <div className="mt-1 text-xs text-gray-600">v2.0 — Smart Warehouse</div>
+      <div className="sidebar-footer border-t border-line px-5 py-4 text-xs text-dim">
+        <div className="text-[10px] uppercase tracking-[0.2em] text-dim">DTX-AI Console</div>
+        <div className="mt-1 text-xs text-dim">v3.0 Final — Smart Warehouse</div>
       </div>
     </aside>
   );

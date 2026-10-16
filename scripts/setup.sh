@@ -2,7 +2,7 @@
 # scripts/setup.sh — one-time developer environment setup
 set -euo pipefail
 
-echo "=== DTX-AI Setup ==="
+echo "=== DTX-AI v3.0 Final Setup ==="
 
 # ---- Python virtual environment ----
 if [ ! -d ".venv" ]; then
@@ -26,7 +26,7 @@ echo "[5/5] Installing dashboard npm dependencies…"
 (cd apps/dashboard && npm install --silent)
 
 # ---- Copy example .env files if not present ----
-for env_example in apps/api/.env.example apps/sim/.env.example apps/dashboard/.env.example; do
+for env_example in apps/api/.env.example apps/dashboard/.env.example; do
   target="${env_example%.example}"
   if [ ! -f "$target" ]; then
     cp "$env_example" "$target"

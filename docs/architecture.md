@@ -1,107 +1,50 @@
-# Architecture — DTX-AI Smart Warehouse XAI Digital Twin
+# Architecture — DTX-AI v3.0 Final
 
-## System Context
+DTX-AI is a local smart-warehouse anomaly detection and explainability
+application. The release includes the FastAPI backend, React console,
+seven model families, dataset replay, and ESP32 hardware ingestion.
 
-DTX-AI is a university capstone project that demonstrates AI-driven anomaly
-detection, explainability (XAI), and operator visibility for a
-smart warehouse software stack.
-
-Current critical demo path excludes Isaac Sim and focuses on real API ingestion,
-runtime model inference, explanation, and dashboard visibility.
-
----
-
-## High-Level Architecture Diagram
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Client Layer                         │
-│  Browser (React + Vite dashboard)  ◄──── WebSocket          │
-└─────────────────────┬───────────────────────────────────────┘
-                      │ HTTP / WebSocket
-┌─────────────────────▼───────────────────────────────────────┐
-│                  apps/api  (FastAPI)                        │
-│  POST /events   GET /alerts   GET /health   GET /metrics/live  WS /ws/events   │
-│                      │                                      │
-│            calls services/ai pipeline                       │
-│                      │                                      │
-│  ┌───────────────────▼──────────────────┐                   │
-│  │          services/ai                 │                   │
-│  │  detector.py  ──►  explainer.py      │                   │
-│  └───────────────────┬──────────────────┘                   │
-│                      │ TwinUpdate                           │
-│  ┌───────────────────▼──────────────────┐                   │
-│  │      in-memory replay metrics        │                   │
-│  └───────────────────┬──────────────────┘                   │
-│                      │                                      │
-│  ┌───────────────────▼──────────────────┐                   │
-│  │          apps/sim adapter            │                   │
-│  │   (optional / later integration)     │                   │
-│  └───────────────────┬──────────────────┘                   │
-└────────────────────────────────────────────────────────────-┘
-                       │
-              ┌────────▼────────┐
-              │  NVIDIA Isaac   │
-              │     Sim 4.x     │
-              └─────────────────┘
+```text
+Dataset replay --------------------+
+                                   v
+ESP32 -> hardware bridge -> POST /events/ -> AI pipeline
+                                              |
+                                       SQLite + metrics
+                                              |
+                                         WebSocket
+                                              v
+                          Dashboard / Events / AI Validation / Settings
 ```
 
----
+## Components
 
-## Module Responsibilities
+| Component | Responsibility |
+| --- | --- |
+| `apps/api` | Validate events, run inference, persist records, broadcast updates, and manage demos and operator actions |
+| `services/ai` | Registry-based model loading, inference, tree-model SHAP explanations, and documented fallbacks |
+| `apps/dashboard` | Live monitoring, saved event history, model validation, operator actions, and local preferences |
+| `HW` | ESP32 firmware for the DS18B20 and BMP280 |
+| `scripts/hw_demo_bridge.py` | Map hardware readings into model inputs and record real/derived/synthesized provenance |
+| `packages/shared` | Canonical Pydantic schemas |
 
-| Module | Responsibility |
-|--------|---------------|
-| `apps/api` | Accepts events, orchestrates pipeline, persists to SQLite, broadcasts alerts |
-| `services/ai` | Anomaly detection (stub → real model), XAI explanation generator |
-| `apps/dashboard` | Real-time alert display, event history, explanation panel |
-| `apps/sim` | Isaac Sim adapter — updates digital-twin asset status |
-| `packages/shared` | Canonical Pydantic schemas, single source of truth for inter-service contracts |
-| `data/` | Synthetic event data and local SQLite database |
+## Request flow
 
----
+1. Replay or hardware ingestion sends an `EventIn` to `POST /events/`.
+2. The API calls `ai.pipeline.run_pipeline` in-process.
+3. The result is persisted in SQLite. Dataset replay also updates in-memory accuracy metrics.
+4. A `DashboardAlert` is broadcast over `/ws/events`.
+5. The console renders the event, explanation, and operator controls.
+6. Operator actions are saved through `/alerts/{event_id}/actions`.
 
-## Data Flow (MVP)
+The API listens on port 8000; the dashboard development server uses 5173.
+The hardware node serves `/health` and `/reading` on port 80.
 
-1. **Event ingested** — `POST /events` receives an `EventIn` JSON payload.
-    Source can be synthetic seeding or dataset replay.
-2. **AI pipeline** — `services/ai.pipeline.run_pipeline(event)` returns `(AnomalyResult, ExplanationResult)`.
-3. **Persistence** — the API inserts an `EventLog` row into SQLite.
-4. **Replay metrics** — if `event.metadata.source=dataset_replay`, running metrics are updated in memory.
-5. **Broadcast** — a `DashboardAlert` (event + anomaly + explanation) is sent over WebSocket.
-6. **Digital twin** — a `TwinUpdate` is passed to `apps/sim.adapter.notify()` (optional).
-7. **Dashboard** — the React frontend receives the WebSocket message and updates the UI.
+## Verification and boundaries
 
----
+`tests/unit`, `tests/smoke`, and `tests/integration` cover helpers, schemas,
+model loading, replay, sensor fault handling, and API workflows.
 
-## Scalability Notes (post-MVP)
-
-- Replace SQLite with PostgreSQL when data volume grows.
-- Replace rule-based detector with a trained Isolation Forest or Autoencoder.
-- Add a message queue (Redis Streams or NATS) between API and AI service for high-throughput scenarios.
-- Isaac Sim integration can be extended to use Omniverse Nucleus for multi-user scene collaboration.
-
----
-
-## Verification Layers
-
-The current codebase is verified through three complementary test layers:
-
-1. **Unit tests** — `tests/unit/`
-   Covers helper logic in `apps/api/api/routes/events.py`, `apps/api/api/database.py`,
-   `apps/api/api/config.py`, `apps/api/api/ws_manager.py`, and the stubbed Isaac Sim
-   modules under `apps/sim/sim/`.
-2. **Smoke tests** — `tests/smoke/`
-   Covers schemas, replay helper utilities, model-loader behavior, and the stable
-   rule-based AI fallback path.
-3. **Integration tests** — `tests/integration/`
-   Exercises the FastAPI app through ASGI requests for ingestion, metrics, timeline,
-   alerts, and operator-action workflows.
-
-Recommended repo-root command:
-
-```bash
-PYTHONPATH="packages:services:services/ai:apps/api:apps/sim" .venv/bin/pytest -q
-```
-
-Current local baseline after the latest unit-test expansion: `54 passed`.
+The final release targets a local demonstration environment. Live Isaac Sim
+integration, production authentication, and distributed infrastructure are
+outside its scope. Dataset limitations and the synthesized hardware channels
+are documented in [dataset_limitations.md](dataset_limitations.md).

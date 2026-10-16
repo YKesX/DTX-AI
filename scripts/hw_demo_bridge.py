@@ -16,7 +16,7 @@ Channel mapping
                               pseudo-pressure is a hydraulic-line *delta*
                               (tens of kPa around 0), while the BMP280 reports
                               ~101 kPa absolute with only small ambient
-                              wiggles — the gain lets a finger press / blow on
+                              wiggles — the gain lets a controlled change in air pressure around
                               the sensor land inside the fault range.
 * ``power_dissipated_w``   <- nominal median + ``--power-per-degree`` for
                               every °C above the startup temperature baseline
@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
 import signal
 import sys
@@ -51,8 +52,20 @@ if ai_path not in sys.path:
 
 from preprocessing import FEATURES, get_training_pool, load_data  # noqa: E402
 
-REAL_CHANNELS = {"temperature_c", "pseudo_pressure_pa"}
-DERIVED_CHANNELS = {"power_dissipated_w"}
+def sensor_values(reading: dict[str, Any]) -> tuple[float | None, float | None]:
+    """Only accept finite, in-range readings with no explicit sensor fault."""
+    age = reading.get("sample_age_ms")
+    if age is not None and (not isinstance(age, (int, float)) or not math.isfinite(age) or age < 0 or age > 3000):
+        return None, None
+
+    def value(key: str, health_key: str, low: float, high: float) -> float | None:
+        raw = reading.get(key)
+        if reading.get(health_key) is False or isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            return None
+        return float(raw) if math.isfinite(raw) and low <= raw <= high else None
+
+    return (value("temperature_c", "ds18b20_ok", -55, 125),
+            value("pressure_pa", "bmp280_ok", 30000, 110000))
 
 
 def fetch_json(url: str, timeout: float = 5.0) -> dict[str, Any]:
@@ -85,10 +98,11 @@ def calibrate(esp32_url: str, samples: int, interval: float) -> tuple[float, flo
     pressures: list[float] = []
     for _ in range(samples):
         reading = fetch_json(f"{esp32_url}/reading")
-        if reading.get("temperature_c") is not None:
-            temps.append(float(reading["temperature_c"]))
-        if reading.get("pressure_pa") is not None:
-            pressures.append(float(reading["pressure_pa"]))
+        temp, pressure = sensor_values(reading)
+        if temp is not None:
+            temps.append(temp)
+        if pressure is not None:
+            pressures.append(pressure)
         time.sleep(interval)
     if not temps and not pressures:
         raise RuntimeError(
@@ -118,17 +132,26 @@ def build_event_payload(
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()),
     }
 
-    real_temp = reading.get("temperature_c")
-    real_pressure = reading.get("pressure_pa")
+    real_temp, real_pressure = sensor_values(reading)
+    if real_temp is None and real_pressure is None:
+        raise ValueError("No valid, fresh sensor readings; skipping event instead of fabricating hardware data.")
+    if real_pressure is not None and not math.isfinite(pressure_baseline):
+        raise ValueError("BMP280 has no calibrated baseline; restart the bridge to calibrate it.")
+    real_channels = set()
+    if real_temp is not None:
+        real_channels.add("temperature_c")
+    if real_pressure is not None:
+        real_channels.add("pseudo_pressure_pa")
+    derived_channels = {"power_dissipated_w"} if real_temp is not None and math.isfinite(temp_baseline) else set()
 
     for channel in FEATURES:
         if channel == "temperature_c" and real_temp is not None:
             payload[channel] = float(real_temp)
         elif channel == "pseudo_pressure_pa" and real_pressure is not None:
             payload[channel] = (float(real_pressure) - pressure_baseline) * pressure_gain
-        elif channel == "power_dissipated_w":
+        elif channel in derived_channels:
             base = stats[channel]["median"]
-            if real_temp is not None and temp_baseline == temp_baseline:  # not NaN
+            if real_temp is not None and math.isfinite(temp_baseline):
                 base += max(0.0, float(real_temp) - temp_baseline) * power_per_degree
             payload[channel] = base
         else:
@@ -143,15 +166,20 @@ def build_event_payload(
         "raw_reading": {
             "temperature_c": real_temp,
             "pressure_pa": real_pressure,
-            "bmp280_temperature_c": reading.get("bmp280_temperature_c"),
+            "bmp280_temperature_c": (
+                reading.get("bmp280_temperature_c")
+                if isinstance(reading.get("bmp280_temperature_c"), (int, float))
+                and math.isfinite(reading["bmp280_temperature_c"])
+                else None
+            ),
         },
         "baselines": {
-            "temperature_c": None if temp_baseline != temp_baseline else round(temp_baseline, 3),
-            "pressure_pa": None if pressure_baseline != pressure_baseline else round(pressure_baseline, 1),
+            "temperature_c": None if not math.isfinite(temp_baseline) else round(temp_baseline, 3),
+            "pressure_pa": None if not math.isfinite(pressure_baseline) else round(pressure_baseline, 1),
         },
-        "real_channels": sorted(REAL_CHANNELS),
-        "derived_channels": sorted(DERIVED_CHANNELS),
-        "synthesized_channels": sorted(set(FEATURES) - REAL_CHANNELS - DERIVED_CHANNELS),
+        "real_channels": sorted(real_channels),
+        "derived_channels": sorted(derived_channels),
+        "synthesized_channels": sorted(set(FEATURES) - real_channels - derived_channels),
         "bridge_sequence": sequence,
         "active_model": model,
     }
@@ -161,7 +189,7 @@ def build_event_payload(
 def post_event(base_url: str, payload: dict[str, Any]) -> dict[str, Any]:
     req = urllib.request.Request(
         f"{base_url}/events/",
-        data=json.dumps(payload).encode("utf-8"),
+        data=json.dumps(payload, allow_nan=False).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
@@ -223,6 +251,13 @@ def main() -> None:
         sequence += 1
         try:
             reading = fetch_json(f"{args.esp32_url}/reading")
+            temp, pressure = sensor_values(reading)
+            if temp is not None and not math.isfinite(temp_baseline):
+                temp_baseline = temp
+                print("[bridge] recovered DS18B20: calibrated its baseline from the first valid reading.")
+            if pressure is not None and not math.isfinite(pressure_baseline):
+                pressure_baseline = pressure
+                print("[bridge] recovered BMP280: calibrated its baseline from the first valid reading.")
             payload = build_event_payload(
                 reading, stats,
                 temp_baseline=temp_baseline,
@@ -243,7 +278,7 @@ def main() -> None:
                 f"score={float(anomaly.get('anomaly_score', 0.0)):.4f} "
                 f"model={metadata.get('runtime_model', '?')}"
             )
-        except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+        except (urllib.error.URLError, OSError, ValueError) as exc:
             print(f"[{sequence:>5}] sample failed: {type(exc).__name__}: {exc}", file=sys.stderr)
 
         if args.count and sequence >= args.count:

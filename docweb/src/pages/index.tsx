@@ -9,9 +9,9 @@ import styles from './index.module.css';
 
 const signalCards = [
   {
-    value: '4',
+    value: '7',
     label: 'Model families',
-    detail: 'LightGBM, XGBoost, Random Forest, LSTM-AE',
+    detail: 'Random Forest, LightGBM, XGBoost, TabNet, CNN, Bi-LSTM, LSTM-AE',
   },
   {
     value: 'Live',
@@ -31,7 +31,7 @@ function HomepageHeader() {
     <header className={styles.heroBanner}>
       <div className={styles.heroInner}>
         <div className={styles.heroCopy}>
-          <p className={styles.heroEyebrow}>Documentation / Spring 2026</p>
+          <p className={styles.heroEyebrow}>Documentation / v3.0 Final</p>
           <Heading as="h1" className={styles.heroTitle}>
             {siteConfig.title}
           </Heading>
@@ -50,7 +50,7 @@ function HomepageHeader() {
             </Link>
           </div>
           <div className={styles.heroMeta}>
-            <span>Version v2.0</span>
+            <span>v3.0 Final</span>
             <span>Graduation project</span>
             <span>Atılım University</span>
           </div>

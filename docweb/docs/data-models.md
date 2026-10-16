@@ -23,9 +23,6 @@ class AnomalyType(str, Enum):
 class Severity(str, Enum):
     INFO | WARNING | CRITICAL
 
-class AssetStatus(str, Enum):
-    NORMAL | DEGRADED | FAULT | OFFLINE
-
 class AlertActionType(str, Enum):
     ACKNOWLEDGE | ASSIGN | ESCALATE | RESOLVE
 ```
@@ -44,7 +41,7 @@ Core input schema received at `POST /events/`. Every sensor channel is optional 
 | `asset_id` | `str` | **Yes** | Asset / forklift identifier |
 | `zone_id` | `str` | **Yes** | Warehouse zone identifier |
 | `timestamp` | `datetime` | No (auto-gen) | UTC event time |
-| `metadata` | `dict[str, Any]` | No (`{}`) | Arbitrary replay/source metadata — `metadata.source` is `dataset_replay`, `hardware_demo`, or `isaac_sim` depending on the producer |
+| `metadata` | `dict[str, Any]` | No (`{}`) | Arbitrary replay/source metadata — `metadata.source` is `dataset_replay` or `hardware_demo` for the supplied producers |
 
 ### Sensor channels (all optional, all `float \| None`)
 
@@ -111,22 +108,6 @@ Composed broadcast envelope — sent over WebSocket and returned by `POST /event
   "created_at":  "2026-05-14T12:00:00Z"
 }
 ```
-
----
-
-## TwinUpdate
-
-Sent from the API to the Isaac Sim adapter after each anomaly.
-
-| Field | Type | Description |
-|---|---|---|
-| `event_id` | `UUID` | References event |
-| `asset_id` | `str` | Asset to update in the USD scene |
-| `zone_id` | `str` | Zone of the asset |
-| `new_status` | `AssetStatus` | NORMAL / DEGRADED / FAULT / OFFLINE |
-| `severity` | `Severity` | Severity level |
-| `label` | `str` | Short display label for sim overlay (e.g. `bearing_wear / score=0.97`) |
-| `timestamp` | `datetime` | Update time |
 
 ---
 

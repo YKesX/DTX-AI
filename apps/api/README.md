@@ -1,5 +1,7 @@
 # apps/api — FastAPI backend for DTX-AI
 
+Release: **v3.0 Final** (package version `3.0.0`).
+
 ## Responsibilities
 - Accept warehouse events via `POST /events`
 - Pass events to the AI pipeline (services/ai)

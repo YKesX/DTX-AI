@@ -1,7 +1,6 @@
-# Current Usage Guide (Current Software Stage)
+# Usage Guide — v3.0 Final
 
-This guide covers the current end-to-end software path for DTX-AI.
-Isaac Sim is intentionally excluded from this stage.
+This guide covers the completed local application. Live Isaac Sim integration is outside the final release.
 
 ## 1) Setup
 
@@ -160,10 +159,10 @@ This powers the drilldown chart for:
 Current automated suite is organized into three layers:
 
 - `tests/unit/`
-  - event-route helpers (`_normalize_gt_label`, `_build_twin_update`, label mapping)
+  - event-route helpers (`_normalize_gt_label`, label mapping)
   - database helpers (`_parse_payload`, operator-state derivation, timeline extraction, clear/reset flow)
   - config parsing and `ConnectionManager`
-  - Isaac Sim adapter / scene / lifecycle stub behavior
+  - hardware sensor validation and bridge provenance
 - `tests/smoke/`
   - schemas
   - replay helper script behavior
@@ -176,17 +175,16 @@ Current automated suite is organized into three layers:
 Recommended commands:
 
 ```bash
-PYTHONPATH="packages:services:services/ai:apps/api:apps/sim" .venv/bin/pytest -q
-PYTHONPATH="packages:services:services/ai:apps/api:apps/sim" .venv/bin/pytest -q tests/unit
+PYTHONPATH="packages:services:services/ai:apps/api" .venv/bin/pytest -q
+PYTHONPATH="packages:services:services/ai:apps/api" .venv/bin/pytest -q tests/unit
 .venv/bin/pytest -q tests/smoke
 .venv/bin/pytest -q tests/integration
 ```
 
-Current local baseline: `56 passed`.
 
-## 11) Later stages (not current path)
 
-- Isaac Sim live integration
-- harder, noisier simulation data (the current dataset is still highly separable — see [docs/isaac_sim_integration.md](isaac_sim_integration.md))
+## 11) Final release boundaries
 
-Hardware sensor ingestion is now implemented — see the IRL hardware demo above and [docs/hardware_demo.md](hardware_demo.md). All 7 model families are benchmarked on the same canonical split in `services/ai/ai/models/shared/leaderboard.json`.
+Live Isaac Sim integration is outside v3.0 Final. Dataset limitations are
+recorded in [dataset_limitations.md](dataset_limitations.md). Hardware
+wiring and operation are documented in [hardware_demo.md](hardware_demo.md).

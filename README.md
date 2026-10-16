@@ -1,8 +1,8 @@
-# DTX-AI — Smart Warehouse Anomaly Detection + Explainable AI
+# DTX-AI v3.0 Final — Smart Warehouse Anomaly Detection + Explainable AI
 
 DTX-AI is a university capstone project for intelligent warehouse monitoring and decision support.
 
-## Whole project scope
+## Final release scope
 
 DTX-AI is a full-stack AI system, not only a dashboard or notebook:
 
@@ -12,11 +12,10 @@ DTX-AI is a full-stack AI system, not only a dashboard or notebook:
 - live dashboard for operators
 - dataset replay validation against a leakage-safe holdout
 - hardware/sensor integration (ESP32 — see [HW/](HW) and [docs/hardware_demo.md](docs/hardware_demo.md))
-- later digital twin integration with NVIDIA Isaac Sim
 
-## Current project stage (truthful scope)
+## Release capabilities
 
-Current critical path is the software demo path **without Isaac Sim**:
+The completed local application includes:
 
 - real API ingestion (`POST /events/`)
 - runtime model inference (active model selection across 7 model families)
@@ -138,14 +137,15 @@ Dashboard convenience:
 
 - The event table includes a **Clear Logs** button that clears dashboard rows, deletes persisted API event logs, and resets live replay metrics for fresh percentage tracking.
 - The operations dashboard includes an asset drilldown chart and operator-action panel for the selected alert.
+- `/events` provides searchable saved event history and operator actions; `/settings` saves browser-local event refresh and hardware/demo defaults.
 - The `/validation` page surfaces replay metrics, class distributions, confusion matrix, and recent replay rows for model-review demos.
 
-## Current limitations
+## Release limitations
 
-- Isaac Sim intentionally excluded from this current validation path
-- the training notebook is generated from `scripts/train_models.py` via `scripts/gen_training_notebook.py` — regenerate it, do not hand-edit
+- Live Isaac Sim integration is outside the final release.
+- `scripts/train_models.py` is the canonical retraining entry point; the training notebook is retained as an experiment record.
 - LSTM-AE strict replay requires a configured numeric threshold (`default_threshold`)
-- all model metrics now come from the same canonical split (`shared/leaderboard.json`), but the dataset is still highly separable — near-perfect scores reflect the data, not model strength (see [docs/isaac_sim_integration.md](docs/isaac_sim_integration.md))
+- all model metrics now come from the same canonical split (`shared/leaderboard.json`), but the dataset is still highly separable — near-perfect scores reflect the data, not model strength (see [docs/dataset_limitations.md](docs/dataset_limitations.md))
 
 ## Documentation
 

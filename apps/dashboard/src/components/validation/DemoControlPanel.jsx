@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Card from '../ui/Card';
+import { usePreferences } from '../../context/Preferences';
 
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
@@ -12,14 +13,15 @@ const SPLITS = ['holdout', 'episode_holdout', 'temporal', 'all'];
  * start/stop the run. The backend (/demo/*) owns the subprocess.
  */
 export default function DemoControlPanel() {
+  const { preferences } = usePreferences();
   const [mode, setMode] = useState('dataset');
   const [models, setModels] = useState([]);
-  const [model, setModel] = useState('lightgbm');
+  const [model, setModel] = useState(preferences.defaultModel);
   const [split, setSplit] = useState('holdout');
   const [count, setCount] = useState(100);
   const [delay, setDelay] = useState(0.5);
-  const [esp32Url, setEsp32Url] = useState('http://dtx-esp32.local');
-  const [interval, setIntervalSec] = useState(1.0);
+  const [esp32Url, setEsp32Url] = useState(preferences.esp32Url);
+  const [interval, setIntervalSec] = useState(preferences.hardwareInterval);
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -98,23 +100,23 @@ export default function DemoControlPanel() {
   };
 
   const inputClass =
-    'w-full rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 focus:border-blue-500 focus:outline-none';
-  const labelClass = 'block text-xs font-medium uppercase tracking-wide text-gray-400';
+    'control-input w-full rounded-xl px-3 py-2 text-sm';
+  const labelClass = 'block text-xs font-medium uppercase tracking-wide text-muted';
 
   return (
     <Card className="p-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-200">
+          <h2 className="section-title">
             Demo Control
           </h2>
-          <p className="mt-1 text-sm text-gray-400">
+          <p className="mt-1 text-sm text-muted">
             Replay the unseen dataset holdout or stream live ESP32 sensor data
           </p>
         </div>
         <span
           className={`rounded-full px-3 py-1 text-xs font-semibold ${
-            running ? 'bg-green-500/20 text-green-300' : 'bg-gray-700/40 text-gray-400'
+            running ? 'bg-green-500/20 text-green-800' : 'bg-paper-selected text-muted'
           }`}
         >
           {running ? `running — ${status?.mode}` : 'idle'}
@@ -133,8 +135,8 @@ export default function DemoControlPanel() {
             disabled={running}
             className={`rounded-2xl px-4 py-2 text-sm font-medium transition ${
               mode === opt.key
-                ? 'bg-blue-600 text-white'
-                : 'control-panel-muted text-gray-300 hover:text-white'
+                ? 'bg-ink text-white'
+                : 'control-panel-muted text-muted hover:text-ink'
             } ${running ? 'opacity-60' : ''}`}
           >
             {opt.label}
@@ -235,7 +237,7 @@ export default function DemoControlPanel() {
             type="button"
             onClick={stop}
             disabled={busy}
-            className="rounded-2xl bg-red-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-red-500 disabled:opacity-60"
+            className="rounded-2xl bg-red-800 px-5 py-2 text-sm font-semibold text-white transition hover:bg-red-500 disabled:opacity-60"
           >
             Stop demo
           </button>
@@ -244,16 +246,16 @@ export default function DemoControlPanel() {
             type="button"
             onClick={start}
             disabled={busy}
-            className="rounded-2xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
+            className="rounded-2xl bg-ink px-5 py-2 text-sm font-semibold text-white transition hover:bg-black disabled:opacity-60"
           >
             Start {mode === 'dataset' ? 'dataset replay' : 'IRL demo'}
           </button>
         )}
-        {error && <span className="text-sm text-red-400">{error}</span>}
+        {error && <span className="text-sm text-red-800">{error}</span>}
       </div>
 
       {status?.log_tail?.length > 0 && (
-        <pre className="mt-4 max-h-40 overflow-y-auto rounded-xl bg-black/40 p-3 text-xs leading-relaxed text-gray-400">
+        <pre className="mt-4 max-h-40 overflow-y-auto rounded-xl bg-paper p-3 text-xs leading-relaxed text-muted">
           {status.log_tail.join('\n')}
         </pre>
       )}

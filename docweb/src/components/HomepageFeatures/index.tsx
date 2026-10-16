@@ -17,7 +17,7 @@ const FeatureList: FeatureItem[] = [
     title: 'System design',
     href: '/docs/architecture',
     description:
-      'Start with the request path, service boundaries, ports, and communication model across the API, dashboard, and simulator adapter.',
+      'Start with the request path, service boundaries, ports, and communication model across the API, dashboard, and ESP32 hardware bridge.',
     meta: 'Architecture, services, repository structure',
   },
   {

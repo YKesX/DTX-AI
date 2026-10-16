@@ -4,29 +4,18 @@ import Card from '../ui/Card';
 function StatCard({ icon: Icon, label, value, pulse }) {
   return (
     <Card className="relative overflow-hidden p-5">
-      <div className={`absolute inset-x-6 top-0 h-px ${pulse ? 'bg-[linear-gradient(90deg,transparent,var(--accent-red),transparent)]' : 'bg-[linear-gradient(90deg,transparent,var(--accent-cyan),var(--accent-blue),transparent)]'}`} />
-      <div className="flex items-center gap-4">
-      <div
-        className={`rounded-xl border p-3 ${
-          pulse
-            ? 'border-white/12 bg-white/8'
-            : 'border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(140,241,222,0.04))]'
-        }`}
-      >
-        <Icon
-          className={`h-5 w-5 ${pulse ? 'text-red-300' : 'text-[var(--accent-cyan)]'}`}
-        />
+      <div className="mb-5 flex items-start justify-between gap-3">
+        <p className="text-[10px] uppercase tracking-[0.14em] text-dim">{label}</p>
+        <Icon className={`h-4 w-4 shrink-0 ${pulse ? 'text-red-800' : 'text-dim'}`} />
       </div>
       <div className="min-w-0">
-        <p className="text-[11px] uppercase tracking-[0.22em] text-gray-500">{label}</p>
         <p
-          className={`mt-1 text-xl font-bold ${
-            pulse ? 'text-red-300' : 'text-white'
+          className={`stat-value ${
+            pulse ? 'text-red-800' : 'text-ink'
           }`}
         >
           {value}
         </p>
-      </div>
       </div>
     </Card>
   );
@@ -38,7 +27,7 @@ export default function StatusCards({ activeAlerts, connectedSensors, lastDataTi
   const replayAccuracy = replayMetrics?.running_accuracy ?? 0;
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-4">
       <StatCard
         icon={Bell}
         label="Active Alerts"

@@ -28,16 +28,18 @@ DTX-AI/
 │   │           ├── metrics.py        # GET /metrics/live replay metrics
 │   │           └── websocket.py      # WS /ws/events endpoint
 │   │
-│   ├── dashboard/                    # React + Vite frontend
+│   └── dashboard/                    # React + Vite frontend
 │   │   ├── package.json
 │   │   ├── vite.config.js
 │   │   └── src/
 │   │       ├── App.jsx               # BrowserRouter + Layout + routes
 │   │       ├── pages/
 │   │       │   ├── Dashboard.jsx     # Main ops page at "/"
-│   │       │   └── Validation.jsx    # AI validation page at "/validation"
+│   │       │   ├── Validation.jsx    # AI validation page at "/validation"
+│   │       │   ├── Events.jsx        # Saved event history at "/events"
+│   │       │   └── Settings.jsx      # Local preferences at "/settings"
 │   │       ├── components/
-│   │       │   ├── dashboard/        # StatusCards, EventTable, ExplanationPanel, …
+│   │       │   └── dashboard/        # StatusCards, EventTable, ExplanationPanel, …
 │   │       │   ├── validation/       # DemoControlPanel, ReplaySummaryCards, ConfusionMatrix, …
 │   │       │   ├── layout/           # Sidebar, TopBar
 │   │       │   └── ui/               # Badge, Card
@@ -46,18 +48,13 @@ DTX-AI/
 │   │       └── lib/
 │   │           └── normalizeAlert.js # Multi-shape alert normaliser
 │   │
-│   └── sim/                          # NVIDIA Isaac Sim adapter (stub today)
-│       └── sim/
-│           ├── adapter.py            # notify(TwinUpdate) entry point
-│           ├── scene.py              # USD scene helpers (stubbed)
-│           └── hooks.py              # Sim lifecycle hooks (stubbed)
 │
 ├── services/
 │   └── ai/                           # AI / ML pipeline (imported into API)
 │       ├── requirements.txt          # sklearn 1.8, lightgbm 4.6, xgboost 3.2, pytorch-tabnet, …
 │       ├── preprocessing.py          # CSV loader + CLASS_NAMES + FEATURES + canonical splits
 │       ├── dtx_ai_master_dataset.csv # ~60 Hz telemetry dataset (22 270 rows, 13 fault runs)
-│       ├── dtxai_model_training.ipynb # Generated from train_models.py (gen_training_notebook.py)
+│       ├── dtxai_model_training.ipynb # Training experiment record
 │       └── ai/
 │           ├── pipeline.py           # async run_pipeline(event) entry point
 │           ├── detector.py           # Multi-model detector + windowed buffers + rule-based fallback
@@ -92,7 +89,6 @@ DTX-AI/
 │   ├── run_demo.sh                   # Boot stack + replay the leakage-safe demo holdout
 │   ├── replay_dataset_demo.py        # Dataset replay CLI
 │   ├── hw_demo_bridge.py             # ESP32 → POST /events/ hardware demo bridge
-│   ├── gen_training_notebook.py      # Regenerates the training notebook from train_models.py
 │   └── train_models.py               # One-shot retrain of every artifact
 │
 ├── HW/                               # PlatformIO project — ESP32 hardware demo node
@@ -109,7 +105,7 @@ DTX-AI/
 │   │   ├── test_config_and_ws_manager.py
 │   │   ├── test_database_helpers.py
 │   │   ├── test_events_helpers.py
-│   │   └── test_sim_adapter_and_hooks.py
+│   │   └── test_hw_demo_bridge.py
 │   └── smoke/
 │       ├── test_ai_pipeline.py
 │       ├── test_live_metrics.py
@@ -142,12 +138,11 @@ DTX-AI/
 | `packages/shared/schemas.py` | All canonical Pydantic v2 schemas |
 | `scripts/train_models.py` | One-shot retrain of every artifact (7 families, canonical split) |
 | `scripts/hw_demo_bridge.py` | Polls the ESP32 node and streams hardware events into `POST /events/` |
-| `scripts/gen_training_notebook.py` | Regenerates `dtxai_model_training.ipynb` from `train_models.py` |
 
 ## Test Layers
 
 | Test layer | Purpose |
 |---|---|
-| `tests/unit/` | Fast feedback for helper logic in API, config, database, websocket, and Isaac Sim stub modules |
+| `tests/unit/` | Fast feedback for helper logic in API, config, database, websocket, and hardware ingestion |
 | `tests/smoke/` | Stable behavior checks for schemas, replay helpers, runtime loading, and fallback AI pipeline flow |
 | `tests/integration/` | End-to-end FastAPI route coverage through the in-process AI pipeline and SQLite-backed API behavior |

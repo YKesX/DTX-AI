@@ -26,23 +26,23 @@ export default function ConfusionMatrix({ metrics }) {
   return (
     <Card className="p-5">
       <div className="mb-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-200">
+        <h2 className="section-title">
           Confusion Matrix
         </h2>
-        <p className="mt-1 text-sm text-gray-400">
+        <p className="mt-1 text-sm text-muted">
           Ground-truth and prediction matches during replay
         </p>
       </div>
 
       {labels.length === 0 ? (
-        <div className="flex h-48 items-center justify-center text-sm text-gray-500">
+        <div className="flex h-48 items-center justify-center text-sm text-dim">
           Not enough replay data to build the matrix.
         </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[480px] text-sm">
             <thead>
-              <tr className="border-b border-white/10 text-xs uppercase tracking-[0.18em] text-gray-500">
+              <tr className="border-b border-line text-xs uppercase tracking-[0.18em] text-dim">
                 <th className="px-3 py-2 text-left">Actual \ Pred</th>
                 {labels.map((label) => (
                   <th key={label} className="px-3 py-2 text-left">{label}</th>
@@ -51,8 +51,8 @@ export default function ConfusionMatrix({ metrics }) {
             </thead>
             <tbody>
               {labels.map((actual, rowIndex) => (
-                <tr key={actual} className="border-b border-white/5">
-                  <td className="px-3 py-2 font-medium text-gray-200">{actual}</td>
+                <tr key={actual} className="border-b border-line">
+                  <td className="px-3 py-2 font-medium text-ink">{actual}</td>
                   {labels.map((predicted, colIndex) => {
                     const value = matrix[rowIndex][colIndex];
                     const isDiagonal = rowIndex === colIndex;
@@ -60,7 +60,7 @@ export default function ConfusionMatrix({ metrics }) {
                       <td
                         key={`${actual}-${predicted}`}
                         className={`px-3 py-2 ${
-                          isDiagonal ? 'text-emerald-300' : 'text-gray-300'
+                          isDiagonal ? 'text-emerald-800' : 'text-muted'
                         }`}
                       >
                         {value}

@@ -5,9 +5,9 @@ slug: /overview
 sidebar_position: 1
 ---
 
-# DTX-AI — Smart Warehouse Anomaly Detection
+# DTX-AI v3.0 Final — Smart Warehouse Anomaly Detection
 
-**Version:** v2.1 &nbsp;|&nbsp; **Branch:** `main` &nbsp;|&nbsp; **Date:** June 2026
+**Release:** v3.0 Final &nbsp;|&nbsp; **Package version:** 3.0.0
 
 ---
 
@@ -17,8 +17,6 @@ DTX-AI is a full-stack AI system for smart warehouse anomaly detection with buil
 
 ```
 Sensor frame → FastAPI → AI Pipeline (SHAP + ML) → SQLite + WebSocket → React Dashboard
-                                                        │
-                                                        └─► TwinUpdate ─► Isaac Sim
 ```
 
 ---
@@ -29,12 +27,12 @@ Sensor frame → FastAPI → AI Pipeline (SHAP + ML) → SQLite + WebSocket → 
 |---|---|
 | **Real-time anomaly detection** | 7 model families: Random Forest / LightGBM / XGBoost / TabNet / CNN / Bi-LSTM / LSTM-AE with classification head |
 | **6-class fault taxonomy** | `nominal`, `bearing_wear`, `overheat`, `overload`, `pressure_fault`, `wheel_slip` |
-| **Explainable AI** | SHAP TreeExplainer — per-feature attribution for every prediction |
+| **Explainable AI** | SHAP attribution for supported tree models, with documented model-specific fallbacks |
 | **Live dashboard** | React + WebSocket push — zero-refresh operator UI, with a Demo Control panel to start/stop demos |
 | **Operator workflow** | Acknowledge → Assign → Escalate → Resolve |
 | **Dataset replay validation** | Replay the leakage-safe per-episode temporal demo holdout, track running accuracy vs ground truth |
 | **IRL hardware demo** | ESP32 + DS18B20 + BMP280 node (`HW/`) streams live readings through the same pipeline |
-| **Isaac Sim ready** | 19-channel `EventIn` schema matches the sim's joint / IMU / drive outputs |
+| **Event history and settings** | Search saved events, perform operator actions, and save browser-local preferences |
 
 ---
 
@@ -45,7 +43,6 @@ Sensor frame → FastAPI → AI Pipeline (SHAP + ML) → SQLite + WebSocket → 
 │  Data Sources                                               │
 │  scripts/replay_dataset_demo.py ──► POST /events/  (HTTP)   │
 │  HW/ ESP32 ─► scripts/hw_demo_bridge.py ─► POST /events/    │
-│  Isaac Sim adapter              ──► POST /events/  (HTTP)   │
 └──────────────────────────┬──────────────────────────────────┘
                            │ HTTP :8000
 ┌──────────────────────────▼──────────────────────────────────┐

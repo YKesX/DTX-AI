@@ -58,7 +58,7 @@ channels are treated as zero by the runtime.
   "temperature_c": 25.15,
 
   "metadata": {
-    "source": "isaac_sim",
+    "source": "hardware_demo",
     "active_model": "lightgbm"
   }
 }
@@ -136,9 +136,21 @@ connected dashboard client.
 
 ---
 
-### `GET /events`, `GET /alerts`, `WS /ws/events`, `GET /metrics/live`, `GET /assets/{id}/timeline`, `POST /alerts/{id}/actions`, `DELETE /alerts/clear`
+### History, actions, metrics, and demos
 
-Behaviour is unchanged from the previous contract; only the sensor field
-names and fault-class vocabulary have changed. See the route handlers under
-[`apps/api/api/routes/`](../apps/api/api/routes/) for the precise response
-shapes.
+| Endpoint | Behavior |
+| --- | --- |
+| `GET /alerts/?limit=50` | Latest saved alerts and operator state; limit 1–200 |
+| `GET /alerts/{event_id}/actions` | Action history and derived state |
+| `POST /alerts/{event_id}/actions` | Save acknowledge, assign, escalate, or resolve action |
+| `DELETE /alerts/clear` | Delete saved event history and reset live metrics |
+| `GET /assets/{asset_id}/timeline?limit=50` | Asset history, oldest first; limit 1–200 |
+| `GET /metrics/live` | Replay totals, accuracy, confusion counts, and model counts |
+| `WS /ws/events` | Push `DashboardAlert` messages |
+| `GET /demo/models` | Enabled model keys |
+| `GET /demo/status` | Demo running state, parameters, and log tail |
+| `POST /demo/start` | Start dataset replay or hardware ingestion; 409 if already running |
+| `POST /demo/stop` | Stop the active demo |
+
+The final API release is `3.0.0` (**v3.0 Final**). The runtime OpenAPI
+schema at `/docs` is the precise reference for request and response shapes.

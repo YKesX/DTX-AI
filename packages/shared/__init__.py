@@ -8,7 +8,6 @@ from .schemas import (
     EventIn,
     AnomalyResult,
     ExplanationResult,
-    TwinUpdate,
     DashboardAlert,
     EventLog,
 )
@@ -17,7 +16,6 @@ __all__ = [
     "EventIn",
     "AnomalyResult",
     "ExplanationResult",
-    "TwinUpdate",
     "DashboardAlert",
     "EventLog",
 ]

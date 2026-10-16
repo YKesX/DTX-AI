@@ -15,8 +15,8 @@ export default function ReplaySummaryCards({ metrics }) {
 
         return (
           <Card key={item.key} className="p-5">
-            <p className="text-xs uppercase tracking-[0.22em] text-gray-500">{item.label}</p>
-            <p className="mt-2 text-3xl font-semibold text-white">{value}</p>
+            <p className="text-xs uppercase tracking-[0.22em] text-dim">{item.label}</p>
+            <p className="stat-value mt-2 text-ink">{value}</p>
           </Card>
         );
       })}

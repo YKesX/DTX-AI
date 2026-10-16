@@ -14,7 +14,7 @@
  *    { event_id, asset_id, zone_id, timestamp,
  *      anomaly_score, is_anomaly, anomaly_type, severity, summary }
  *
- * C. Legacy mock shape (flat) — from src/lib/mockData.js:
+ * C. Legacy flat alert shape:
  *    { id, entity, anomaly_type, anomaly_score, severity,
  *      top_features: [{name, value, impact}], explanation: string }
  *
@@ -127,7 +127,7 @@ export function normalizeAlert(raw) {
     };
   }
 
-  // ── Shape B: EventLog row (flat) or legacy mock (flat) ────────────────────
+  // ── Shape B: EventLog row (flat) or legacy flat alert ────────────────────
   const entityId =
     raw.asset_id ?? raw.entity_id ?? raw.entity ?? '';
   const parsedPayload = parseRawPayload(raw.raw_payload);
@@ -168,7 +168,7 @@ export function normalizeAlert(raw) {
     assigned_to: raw.assigned_to ?? '',
     last_action: raw.last_action ?? null,
     last_action_at: raw.last_action_at ?? null,
-    // Preserve existing top_features array if present (e.g. mock data),
+    // Preserve existing top_features array if present,
     // otherwise leave empty (EventLog rows don't store feature detail).
     top_features: Array.isArray(raw.top_features) ? raw.top_features : [],
     explanation:

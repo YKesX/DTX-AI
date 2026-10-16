@@ -23,37 +23,37 @@ export default function ClassDistributionCharts({ metrics }) {
   return (
     <Card className="p-5">
       <div className="mb-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-200">
+        <h2 className="section-title">
           Class Distributions
         </h2>
-        <p className="mt-1 text-sm text-gray-400">
+        <p className="mt-1 text-sm text-muted">
           Class-by-class comparison of ground truth and model predictions
         </p>
       </div>
 
       {data.length === 0 ? (
-        <div className="flex h-64 items-center justify-center text-sm text-gray-500">
+        <div className="flex h-64 items-center justify-center text-sm text-dim">
           No replay data available.
         </div>
       ) : (
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(111,127,144,0.22)" />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--line-soft)" />
             <XAxis
               dataKey="label"
-              tick={{ fill: '#7f90a0', fontSize: 11 }}
-              axisLine={{ stroke: 'rgba(111,127,144,0.28)' }}
+              tick={{ fill: 'var(--text-dim)', fontSize: 11 }}
+              axisLine={{ stroke: 'var(--line-strong)' }}
               tickLine={false}
             />
             <YAxis
-              tick={{ fill: '#7f90a0', fontSize: 11 }}
-              axisLine={{ stroke: 'rgba(111,127,144,0.28)' }}
+              tick={{ fill: 'var(--text-dim)', fontSize: 11 }}
+              axisLine={{ stroke: 'var(--line-strong)' }}
               tickLine={false}
             />
             <Tooltip />
             <Legend />
-            <Bar dataKey="groundTruth" fill="#8cf1de" name="Ground Truth" radius={[10, 10, 0, 0]} />
-            <Bar dataKey="predicted" fill="#8cb8ff" name="Predicted" radius={[10, 10, 0, 0]} />
+            <Bar dataKey="groundTruth" fill="var(--chart-primary)" name="Ground Truth" radius={[10, 10, 0, 0]} />
+            <Bar dataKey="predicted" fill="var(--chart-secondary)" name="Predicted" radius={[10, 10, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       )}

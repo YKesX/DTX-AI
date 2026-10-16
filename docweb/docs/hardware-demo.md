@@ -7,9 +7,11 @@ sidebar_label: Hardware Demo
 
 The hardware demo streams **real sensor readings** into the same
 `POST /events/` pipeline the dataset replay uses, so the dashboard shows
-live model predictions on physical inputs. Heat the DS18B20 (finger,
-hairdryer) to push toward `overheat`; press/blow on the BMP280 to push
-`pseudo_pressure_pa` toward `pressure_fault`.
+live model predictions on physical inputs. Warm the DS18B20 probe to vary the temperature input. The BMP280 measures
+ambient air pressure; use controlled air-pressure changes for pressure tests,
+without pressing on its package or blocking its vent. The model output depends
+on the full feature vector, including synthesized channels; a particular
+physical stimulus does not guarantee a fault prediction.
 
 ```
    ┌────────────┐   1-Wire    ┌──────────────────┐   WiFi/HTTP   ┌──────────────────┐
@@ -28,7 +30,7 @@ hairdryer) to push toward `overheat`; press/blow on the BMP280 to push
 | Part | Pins used |
 | --- | --- |
 | ESP32-WROOM-32 dev board | 3V3, GND, GPIO 4, GPIO 21, GPIO 22 |
-| DS18B20 temperature sensor | `+`, `-`, `OUT` |
+| DS18B20 temperature sensor | `+`, `-`, yellow `DATA` / `OUT` |
 | BMP280 pressure module | `VCC`, `GND`, `SCL`, `SDA`, `CSB`, `SDO` |
 | 4.7 kΩ resistor | pull-up between DS18B20 `OUT` and 3V3 |
 
@@ -79,13 +81,18 @@ graph LR
 | BMP280 `SDO` → GND | sets I2C address `0x76` (the firmware also probes `0x77` as fallback) |
 | BMP280 `SCL`/`SDA` → GPIO 22/21 | ESP32 default I2C pins |
 
+The DS18B20 is the **1-Wire** device; the six-pin BMP280 is **I²C**, not
+1-Wire. Connect the DS18B20's yellow data lead to GPIO 4. Its separate `+`
+and `-` leads supply power and ground. Keep the 4.7 kΩ resistor between
+DATA and 3V3; do not directly short DATA to 3V3.
+
 ## 3. Flash the firmware
 
 Everything that runs on the ESP32 lives under `HW/` (PlatformIO project):
 
 ```bash
 cd HW
-cp include/wifi_config.example.h include/wifi_config.h
+test -f include/wifi_config.h || cp include/wifi_config.example.h include/wifi_config.h
 #   → edit SSID / password (file is gitignored)
 pio run -t upload
 pio device monitor          # 115200 baud — note the IP address
@@ -99,7 +106,13 @@ The node serves:
 | `GET /reading` | `{"temperature_c":…,"pressure_pa":…,"bmp280_temperature_c":…,"sequence":…}` |
 
 mDNS name: `http://dtx-esp32.local` (falls back to the DHCP IP shown on the
-serial monitor if your network blocks mDNS).
+serial monitor if your network blocks mDNS). Use 2.4 GHz WiFi.
+
+Samples are completed once per second after a nonblocking 750 ms temperature
+conversion. `/reading` also includes `sampled_at_ms`, `sample_age_ms`, and both
+sensor health flags. Invalid or stale values are `null`; `/health` reports
+`warming_up`, `ok`, `degraded`, or `stale`. WiFi retries in the background and
+missing sensors are rediscovered periodically.
 
 ## 4. Channel mapping — how 2 real sensors feed a 19-channel model
 
@@ -123,6 +136,11 @@ stimuli — expected and documented behaviour for a 2-sensor rig.
 Every hardware event carries `metadata.source = "hardware_demo"` plus the
 raw reading, baselines, and the real/derived/synthesized channel lists, so
 the dashboard and any later analysis can tell IRL events from replay events.
+If one sensor fails, the bridge identifies its substituted channels as
+synthesized. If both sensors fail or the sample is stale, no event is posted.
+A sensor that was absent during calibration is calibrated from its first
+valid reading on recovery; keep the sensor unstimulated during recovery.
+
 No ground-truth labels are attached: IRL events do not affect
 replay-accuracy metrics.
 
@@ -153,7 +171,8 @@ model), `--power-per-degree` (how strongly heating couples into
 | Symptom | Fix |
 | --- | --- |
 | `temperature_c` is null / −127 °C | missing 4.7 kΩ pull-up, or `OUT` not on GPIO 4 |
+| repeated 85 °C at room temperature | check power and the data pull-up; this may indicate a sensor reset |
 | `bmp280_ok: false` | `CSB` must be tied to 3V3 (I2C mode); check SDA/SCL not swapped |
 | bridge: "ESP32 unreachable" | mDNS blocked → use the raw IP from the serial monitor |
-| everything predicts `nominal` | expected at rest — apply heat/pressure stimuli |
+| everything predicts `nominal` | expected at rest; classification also depends on the synthesized channels |
 | `pressure_fault` triggers immediately | startup baseline captured while you were touching the sensor — restart the bridge hands-off |

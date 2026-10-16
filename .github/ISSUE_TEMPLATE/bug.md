@@ -23,7 +23,7 @@ assignees: ""
 - OS:
 - Python version:
 - Node version:
-- Isaac Sim version (if applicable):
+- DTX-AI release (default: v3.0 Final):
 
 ## Logs / Screenshots
 <!-- Paste relevant logs or attach screenshots -->

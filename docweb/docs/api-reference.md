@@ -50,7 +50,7 @@ curl -X POST http://localhost:8000/events/ \
     "roller_bl_velocity": 0.01,   "roller_br_velocity": 0.0,
     "power_dissipated_w": 299.0,
     "temperature_c": 27.2,
-    "metadata": { "source": "isaac_sim", "active_model": "lightgbm" }
+    "metadata": { "source": "hardware_demo", "active_model": "lightgbm" }
   }'
 ```
 

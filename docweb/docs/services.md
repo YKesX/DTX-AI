@@ -19,7 +19,6 @@ Central coordination hub. Accepts sensor frames, orchestrates the AI pipeline, p
 - Write `EventLog` + `event_actions` rows to SQLite asynchronously
 - Update `LiveReplayMetrics` in-memory when `metadata.source = "dataset_replay"`
 - Broadcast `DashboardAlert` JSON to all WebSocket clients
-- Fire-and-forget `TwinUpdate` to the Isaac Sim adapter
 - Serve alert history, operator actions, asset drilldown, live metrics
 - Orchestrate demos via `/demo/*` — spawn/stop `scripts/replay_dataset_demo.py` (dataset mode) or `scripts/hw_demo_bridge.py` (hardware mode) as a subprocess
 
@@ -58,18 +57,9 @@ Operator-facing real-time control panel.
 - `ExplanationPanel` with SHAP feature bars and operator action buttons
 - `TrendChart` (last 20 anomaly scores) + `AssetDrilldownChart` (per-asset history)
 - `/validation` page — Demo Control panel (start/stop the dataset or IRL/ESP32 demo, pick model/split/count, watch the demo log), confusion matrix, class distributions, per-model counts; the event table shows both `dataset_replay` and `hardware_demo` events
+- `/events` — saved history, filters, inspection, and operator actions
+- `/settings` — browser-local event refresh and demo defaults
 - Operator workflow: acknowledge → assign → escalate → resolve
-
----
-
-## apps/sim — Isaac Sim Adapter
-
-Bridge between the DTX-AI API and NVIDIA Isaac Sim 4.x.
-
-- **Entry point:** `sim/adapter.py::notify(update: TwinUpdate)` — called fire-and-forget from the API
-- **Status:** Logging stub. When `ISAAC_SIM_ENABLED=true` it calls into `sim.scene.update_asset_status`, which is itself a placeholder. The Isaac Sim team owns the implementation — see [docs/isaac_sim_integration.md](https://github.com/YKesX/DTX-AI/blob/main/docs/isaac_sim_integration.md).
-
-All `ImportError`s and runtime failures from the sim adapter are silently suppressed so a missing or down sim never blocks event processing.
 
 ---
 
@@ -87,6 +77,6 @@ PlatformIO firmware project for the IRL demo: an ESP32-WROOM-32 with a DS18B20 t
 Single source of truth for all inter-service data contracts.
 
 - **Package:** `dtx-ai-shared` (installed via `pip install -e packages/shared`)
-- **Contents:** All Pydantic v2 schemas — `EventIn`, `AnomalyResult`, `ExplanationResult`, `DashboardAlert`, `TwinUpdate`, `EventLog`, `AlertActionIn`, `AlertActionRecord`, `AssetTimelinePoint`, `AssetTimelineResponse`
+- **Contents:** All Pydantic v2 schemas — `EventIn`, `AnomalyResult`, `ExplanationResult`, `DashboardAlert`, `EventLog`, `AlertActionIn`, `AlertActionRecord`, `AssetTimelinePoint`, `AssetTimelineResponse`
 
 See [Data Models](/docs/data-models) for the full schema reference.

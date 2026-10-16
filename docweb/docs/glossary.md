@@ -29,9 +29,6 @@ sidebar_position: 14
 | **Model Registry** | `model_registry.json` — lists all available model artifacts, paths, family types, and XAI support flags |
 | **RuntimeModel** | Python dataclass (`model_loader.py`) holding a loaded model object, its metadata, scaler, feature order, and availability status |
 | **Isaac Sim** | NVIDIA Isaac Sim 4.x — robotics simulation platform used for telemetry generation and digital-twin visualisation. The training dataset is sourced from it |
-| **Digital Twin** | Virtual replica of a physical warehouse asset that mirrors its operational status in the simulation environment |
-| **USD** | Universal Scene Description — NVIDIA's file format for 3D scenes in Omniverse/Isaac Sim |
-| **TwinUpdate** | Schema object sent from the API to the Isaac Sim adapter carrying new asset status and severity |
 | **Nominal** | Class 0 — normal operating state, no fault |
 | **Bearing Wear** | Class 1 — drive-joint friction signature, ~300 W of unusual power dissipation |
 | **Overheat** | Class 2 — elevated `temperature_c` with high `power_dissipated_w` and pseudo-pressure |

@@ -11,12 +11,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../packages"))
 from shared.schemas import (  # noqa: E402
     AnomalyResult,
     AnomalyType,
-    AssetStatus,
     DashboardAlert,
     EventIn,
     ExplanationResult,
     Severity,
-    TwinUpdate,
 )
 
 
@@ -96,13 +94,3 @@ class TestDashboardAlert:
         alert = DashboardAlert(event=event, anomaly=anomaly, explanation=explanation)
         assert alert.alert_id is not None
         assert alert.event.asset_id == "forklift-01"
-
-
-class TestTwinUpdate:
-    def test_twin_update_has_required_fields(self):
-        update = TwinUpdate(
-            event_id=uuid4(), asset_id="forklift-01", zone_id="zone-A",
-            new_status=AssetStatus.DEGRADED, severity=Severity.WARNING,
-            label="bearing_wear / score=0.85",
-        )
-        assert update.new_status == AssetStatus.DEGRADED

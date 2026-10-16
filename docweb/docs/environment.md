@@ -43,18 +43,6 @@ Create `apps/dashboard/.env` (copy from `.env.example`):
 
 ---
 
-## apps/sim
-
-| Variable | Default | Description |
-|---|---|---|
-| `ISAAC_SIM_PATH` | `/opt/isaac-sim` | Path to Isaac Sim install root |
-| `ISAAC_SIM_ENABLED` | `false` | Enable the real adapter call into the USD scene |
-| `ISAAC_WS_URL` | `ws://localhost:8211/isaac` | Optional Nucleus / live-sync URL |
-
-The adapter is a logging stub when `ISAAC_SIM_ENABLED=false`. See [docs/isaac_sim_integration.md](https://github.com/YKesX/DTX-AI/blob/main/docs/isaac_sim_integration.md) for what to implement on the Isaac Sim side.
-
----
-
 ## Service Discovery
 
 No service registry or DNS-based discovery. Services find each other via env vars with fixed localhost ports:
@@ -63,7 +51,6 @@ No service registry or DNS-based discovery. Services find each other via env var
 |---|---|
 | API | `http://localhost:8000` |
 | Dashboard | `http://localhost:5173` |
-| Isaac Sim | local install via `ISAAC_SIM_PATH` |
 
 ## Switching Models at Runtime
 

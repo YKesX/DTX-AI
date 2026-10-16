@@ -2,7 +2,7 @@
 
 Built with [Docusaurus](https://docusaurus.io/).
 
-Current docs release: `v2.0`
+Current docs release: `v3.0 Final`
 
 ## Local Development
 

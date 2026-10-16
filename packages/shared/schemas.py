@@ -1,7 +1,7 @@
 """
 Canonical Pydantic schemas shared across all DTX-AI services.
 
-Version: v2.0 — Isaac-Sim telemetry schema.
+Release: v3.0 Final — 19-channel warehouse telemetry schema.
 
 The previous 4-channel (vibration / temperature / humidity / pressure) schema
 has been replaced with the 19-channel sensor set the models are now trained
@@ -41,20 +41,11 @@ class AnomalyType(str, Enum):
 
 
 class Severity(str, Enum):
-    """Severity level used by alerts and twin updates."""
+    """Severity level used by alerts."""
 
     INFO = "info"
     WARNING = "warning"
     CRITICAL = "critical"
-
-
-class AssetStatus(str, Enum):
-    """Digital-twin asset operational status."""
-
-    NORMAL = "normal"
-    DEGRADED = "degraded"
-    FAULT = "fault"
-    OFFLINE = "offline"
 
 
 class AlertActionType(str, Enum):
@@ -163,23 +154,6 @@ class ExplanationResult(BaseModel):
     contributing_features: dict[str, float] = Field(default_factory=dict)
     recommendation: str = Field(default="")
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-# ---------------------------------------------------------------------------
-# Digital-twin update
-# ---------------------------------------------------------------------------
-
-
-class TwinUpdate(BaseModel):
-    """Payload sent to the Isaac Sim adapter when an anomaly is confirmed."""
-
-    event_id: UUID
-    asset_id: str
-    zone_id: str
-    new_status: AssetStatus
-    severity: Severity
-    label: str = Field(default="")
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 # ---------------------------------------------------------------------------

@@ -246,14 +246,19 @@ export default function Dashboard() {
   const trendData = useMemo(() => deriveTrend(events), [events]);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
+      <div className="page-heading">
+        <p className="eyebrow">DTX-AI / Live operations</p>
+        <h1>Warehouse overview</h1>
+        <p>Live telemetry, anomaly insights, and operator decisions in one place.</p>
+      </div>
       <StatusCards
         {...summary}
         replayMetrics={liveMetrics}
       />
 
-      <div className="flex gap-5">
-        <div className="w-[60%]">
+      <div className="grid grid-cols-1 gap-5 2xl:grid-cols-[3fr,2fr]">
+        <div className="min-w-0">
           <EventTable
             events={events}
             onSelectEvent={setSelectedEvent}
@@ -261,7 +266,7 @@ export default function Dashboard() {
             onClearLogs={handleClearLogs}
           />
         </div>
-        <div className="w-[40%]">
+        <div className="min-w-0">
           <ExplanationPanel
             event={selectedEvent}
             actionHistory={actionHistory}

@@ -11,17 +11,17 @@ import {
 import Card from '../ui/Card';
 
 const METRICS = [
-  { key: 'vibration', label: 'Vibration', color: '#8cf1de' },
-  { key: 'temperature', label: 'Temperature', color: '#ff8098' },
-  { key: 'pressure', label: 'Pressure', color: '#7fe1ff' },
-  { key: 'anomaly_score', label: 'Anomaly Score', color: '#8cb8ff' },
+  { key: 'vibration', label: 'Vibration', color: 'var(--chart-primary)' },
+  { key: 'temperature', label: 'Temperature', color: 'var(--accent-red)' },
+  { key: 'pressure', label: 'Pressure', color: 'var(--chart-tertiary)' },
+  { key: 'anomaly_score', label: 'Anomaly Score', color: 'var(--chart-secondary)' },
 ];
 
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-xl border border-[rgba(92,117,142,0.28)] bg-[rgba(12,18,25,0.96)] px-3 py-2 text-xs shadow-xl backdrop-blur-xl">
-      <p className="mb-2 text-gray-400">{label}</p>
+    <div className="rounded-xl border border-line bg-paper px-3 py-2 text-xs shadow-xl backdrop-blur-xl">
+      <p className="mb-2 text-muted">{label}</p>
       {payload.map((item) => (
         <p key={item.dataKey} className="font-medium" style={{ color: item.color }}>
           {item.name}: {typeof item.value === 'number' ? item.value.toFixed(2) : '—'}
@@ -55,10 +55,10 @@ export default function AssetDrilldownChart({
     <Card className="p-5">
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-200">
+          <h2 className="section-title">
             Asset Drilldown Chart
           </h2>
-          <p className="mt-1 text-sm text-gray-400">
+          <p className="mt-1 text-sm text-muted">
             {assetId ? `Latest readings for ${assetId}` : 'Select an event from the table to view the chart'}
           </p>
         </div>
@@ -71,8 +71,8 @@ export default function AssetDrilldownChart({
               onClick={() => onMetricChange?.(metric.key)}
               className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                 metric.key === chartMetric.key
-                  ? 'border-emerald-300/40 bg-emerald-300/12 text-emerald-100'
-                  : 'border-[rgba(92,117,142,0.26)] bg-[rgba(16,24,33,0.84)] text-gray-300 hover:bg-[rgba(32,44,57,0.82)]'
+                  ? 'border-emerald-300/40 bg-emerald-300/12 text-emerald-800'
+                  : 'border-line bg-paper text-muted hover:bg-paper-selected'
               }`}
             >
               {metric.label}
@@ -82,26 +82,26 @@ export default function AssetDrilldownChart({
       </div>
 
       {loading ? (
-        <div className="flex h-[260px] items-center justify-center text-sm text-gray-400">
+        <div className="flex h-[260px] items-center justify-center text-sm text-muted">
           Loading chart data...
         </div>
       ) : chartData.length === 0 ? (
-        <div className="flex h-[260px] items-center justify-center text-sm text-gray-500">
+        <div className="flex h-[260px] items-center justify-center text-sm text-dim">
           No historical data found for this asset.
         </div>
       ) : (
         <ResponsiveContainer width="100%" height={260}>
           <LineChart data={chartData} margin={{ top: 8, right: 12, left: -14, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(111,127,144,0.22)" />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--line-soft)" />
           <XAxis
             dataKey="time"
-            tick={{ fill: '#7f90a0', fontSize: 11 }}
-            axisLine={{ stroke: 'rgba(111,127,144,0.28)' }}
+            tick={{ fill: 'var(--text-dim)', fontSize: 11 }}
+            axisLine={{ stroke: 'var(--line-strong)' }}
             tickLine={false}
           />
           <YAxis
-            tick={{ fill: '#7f90a0', fontSize: 11 }}
-            axisLine={{ stroke: 'rgba(111,127,144,0.28)' }}
+            tick={{ fill: 'var(--text-dim)', fontSize: 11 }}
+            axisLine={{ stroke: 'var(--line-strong)' }}
             tickLine={false}
           />
             <Tooltip content={<CustomTooltip />} />
@@ -119,7 +119,7 @@ export default function AssetDrilldownChart({
               type="monotone"
               dataKey="anomaly_score"
               name="Anomaly Score"
-              stroke="#8cb8ff"
+              stroke="var(--chart-secondary)"
               strokeOpacity={chartMetric.key === 'anomaly_score' ? 0.22 : 0.48}
               strokeWidth={1.5}
               dot={false}

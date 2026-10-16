@@ -1,26 +1,22 @@
-# services/ai — Anomaly Detection & XAI Pipeline
+# DTX-AI v3.0 Final — AI and XAI Pipeline
 
-## Responsibilities
-- Score warehouse events with an anomaly detection model
-- Generate plain-language explanations via XAI (SHAP stub)
-- Expose `run_pipeline(event)` as the single callable for apps/api
+`ai.pipeline.run_pipeline(event)` runs inference and explanation inside the
+FastAPI process. The registry supports Random Forest, LightGBM, XGBoost,
+TabNet, CNN, Bi-LSTM, and LSTM-AE with a classifier head.
 
-## Structure
+- `preprocessing.py`: canonical 19 features, six classes, and temporal splits.
+- `ai/model_loader.py`: registry-based artifact loading and caching.
+- `ai/detector.py`: model dispatch, window buffering, and rule-based fallback.
+- `ai/explainer.py` and `ai/xai_explainer.py`: explanations and tree-model SHAP.
+- `ai/models/`: trained artifacts, scalers, metadata, leaderboard, and baselines.
+- `dtx_ai_master_dataset.csv`: reproducible training and replay dataset.
+- `dtxai_model_training.ipynb`: retained training experiment record.
 
-```
-services/ai/
-├── ai/
-│   ├── pipeline.py      # Orchestration entry point
-│   ├── detector.py      # Anomaly detection model (stub → real model)
-│   └── explainer.py     # XAI explanation generator (stub → SHAP)
-├── requirements.txt
-└── README.md
-```
+Install dependencies using `scripts/setup.sh` from the repository root.
+PyTorch is installed separately as described in `requirements.txt`.
+Start the full application with `bash scripts/run_dev.sh`; retrain with
+`python scripts/train_models.py`. Strict replay requires the selected model
+to load and disables silent fallback.
 
-## Running standalone (for testing)
-
-```bash
-cd services/ai
-pip install -r requirements.txt
-python -m ai.pipeline
-```
+See [dataset limitations](../../docs/dataset_limitations.md) and
+[usage](../../docs/current_usage.md) for interpretation and runtime commands.

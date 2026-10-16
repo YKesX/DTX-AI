@@ -4,107 +4,53 @@ title: System Architecture
 sidebar_position: 2
 ---
 
-# System Architecture
+# Architecture — DTX-AI v3.0 Final
 
-## Pipeline Overview
+DTX-AI is a local smart-warehouse anomaly detection and explainability
+application. The release includes the FastAPI backend, React console,
+seven model families, dataset replay, and ESP32 hardware ingestion.
 
-The system follows a **synchronous request-driven pipeline** with a WebSocket broadcast layer.
-
-1. A client (dataset replayer, the ESP32 hardware bridge, or Isaac Sim adapter) sends a 19-channel sensor frame to FastAPI via `POST /events/`
-2. The backend calls the AI service pipeline **in-process** (via Python import) — anomaly detection + SHAP explanation
-3. Results are persisted to SQLite, broadcast over WebSocket to all dashboard clients, and forwarded to the Isaac Sim adapter (fire-and-forget)
-4. The React dashboard receives events via WebSocket and allows operators to take workflow actions
-
-The hardware demo follows the exact same path: the ESP32 node (`HW/`, DS18B20 + BMP280) serves live readings over HTTP, `scripts/hw_demo_bridge.py` polls it and POSTs full 19-channel frames into `POST /events/` — see the [Hardware Demo](/docs/hardware-demo) page.
-
----
-
-## Component Communication Diagram
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  Data Sources                                                    │
-│  scripts/replay_dataset_demo.py ──► POST /events/  (HTTP)        │
-│  Isaac Sim adapter (you write)   ──► POST /events/  (HTTP)       │
-│  HW/ ESP32 node (DS18B20+BMP280) ──► scripts/hw_demo_bridge.py   │
-│                                      ──► POST /events/  (HTTP)   │
-└──────────────────────────────┬───────────────────────────────────┘
-                               │ HTTP :8000
-┌──────────────────────────────▼───────────────────────────────────┐
-│  apps/api  (FastAPI + uvicorn, port 8000)                        │
-│                                                                  │
-│  POST /events/      ──► services/ai pipeline (in-process)       │
-│  GET  /alerts/      ──► SQLite (aiosqlite)                      │
-│  GET/POST /alerts/{id}/actions ──► SQLite                       │
-│  DELETE /alerts/clear ──► SQLite + live_metrics reset           │
-│  GET  /assets/{id}/timeline ──► SQLite                          │
-│  GET  /metrics/live ──► LiveReplayMetrics (in-memory)           │
-│  /demo/*            ──► spawns replay / hardware-bridge process │
-│  WS   /ws/events    ──► ConnectionManager (broadcast)           │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  services/ai  (imported into API process via PYTHONPATH) │   │
-│  │  ai/pipeline.py → detector.py → explainer.py            │   │
-│  │  model_loader.py  (loads .pkl / .pth from disk)         │   │
-│  │  xai_explainer.py (SHAP TreeExplainer)                  │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  apps/sim adapter (fire-and-forget, optional)                   │
-│  ISAAC_SIM_ENABLED=false → stub log only                        │
-└──────────┬───────────────────────────────────────────────────────┘
-           │ WebSocket ws://localhost:8000/ws/events
-           │ HTTP      http://localhost:8000
-           ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  apps/dashboard  (React + Vite, port 5173)                       │
-│  useWebSocket.js → pushes DashboardAlert into event list         │
-│  GET /alerts/    → initial historical load                       │
-│  GET /metrics/live → polled every 2s (Dashboard), 4s (Validation)│
-│  GET /assets/{id}/timeline → on event select                     │
-│  GET/POST /alerts/{id}/actions → operator workflow               │
-│  /demo/* → Demo Control panel (start/stop dataset or IRL demo)   │
-└──────────────────────────────────────────────────────────────────┘
-           │
-           ▼ (future — currently stub only)
-┌──────────────────────────────────────────────────────────────────┐
-│  NVIDIA Isaac Sim 4.x  (digital twin)                            │
-│  Receives TwinUpdate via apps/sim/sim/adapter.py::notify()       │
-└──────────────────────────────────────────────────────────────────┘
+```text
+Dataset replay --------------------+
+                                   v
+ESP32 -> hardware bridge -> POST /events/ -> AI pipeline
+                                              |
+                                       SQLite + metrics
+                                              |
+                                         WebSocket
+                                              v
+                          Dashboard / Events / AI Validation / Settings
 ```
 
----
+## Components
 
-## Technology Stack
+| Component | Responsibility |
+| --- | --- |
+| `apps/api` | Validate events, run inference, persist records, broadcast updates, and manage demos and operator actions |
+| `services/ai` | Registry-based model loading, inference, tree-model SHAP explanations, and documented fallbacks |
+| `apps/dashboard` | Live monitoring, saved event history, model validation, operator actions, and local preferences |
+| `HW` | ESP32 firmware for the DS18B20 and BMP280 |
+| `scripts/hw_demo_bridge.py` | Map hardware readings into model inputs and record real/derived/synthesized provenance |
+| `packages/shared` | Canonical Pydantic schemas |
 
-| Layer | Technology | Version | Purpose |
-|---|---|---|---|
-| Backend framework | FastAPI | 0.136.1 | REST API + WebSocket server |
-| ASGI server | uvicorn[standard] | 0.46.0 | Async server |
-| Database driver | aiosqlite | 0.22.1 | Async SQLite |
-| Schema validation | Pydantic v2 | 2.13.3 | Request/response models |
-| ML — trees | LightGBM | 4.6.0 | Multi-class fault classification |
-| ML — trees | XGBoost | 3.2.0 | Multi-class fault classification |
-| ML — trees | scikit-learn RF | 1.8.0 | Multi-class fault classification |
-| ML — deep | PyTorch (+CUDA) | 2.11.0+cu128 | CNN, Bi-LSTM, LSTM-AE + classifier head |
-| ML — deep | pytorch-tabnet | ≥ 4.1.0 | TabNet fault classifier |
-| XAI | SHAP | ≥ 0.45 | Feature attribution |
-| Data processing | pandas / numpy | 3.0.2 / 2.4.4 | Dataset I/O |
-| Frontend | React | 18.3.1 | UI |
-| Build tool | Vite | 5.3.4 | Dev server + bundler |
-| CSS | TailwindCSS | 3.4.6 | Styling |
-| Charts | Recharts | 2.12.7 | Line/bar charts |
-| Routing | React Router v6 | 6.24.0 | Client-side navigation |
-| Shared schemas | dtx-ai-shared | 2.0 | Inter-service contracts |
+## Request flow
 
----
+1. Replay or hardware ingestion sends an `EventIn` to `POST /events/`.
+2. The API calls `ai.pipeline.run_pipeline` in-process.
+3. The result is persisted in SQLite. Dataset replay also updates in-memory accuracy metrics.
+4. A `DashboardAlert` is broadcast over `/ws/events`.
+5. The console renders the event, explanation, and operator controls.
+6. Operator actions are saved through `/alerts/{event_id}/actions`.
 
-## Design Decisions
+The API listens on port 8000; the dashboard development server uses 5173.
+The hardware node serves `/health` and `/reading` on port 80.
 
-### Why in-process AI?
-The AI pipeline is imported directly into the FastAPI process rather than running as a separate microservice. This eliminates network latency and serialization overhead for the demo path. A message queue (Redis Streams / NATS) is flagged for high-throughput production use.
+## Verification and boundaries
 
-### Why SQLite?
-SQLite is zero-configuration and sufficient for single-node demo throughput. The architecture notes flag PostgreSQL as the upgrade path when concurrent write volume grows.
+`tests/unit`, `tests/smoke`, and `tests/integration` cover helpers, schemas,
+model loading, replay, sensor fault handling, and API workflows.
 
-### Why WebSocket for real-time?
-Server-Sent Events would work for read-only push, but WebSocket allows bidirectional communication and is simpler to manage under the existing FastAPI stack.
+The final release targets a local demonstration environment. Live Isaac Sim
+integration, production authentication, and distributed infrastructure are
+outside its scope. Dataset limitations and the synthesized hardware channels
+are documented in [Known Limitations](/docs/known-issues).

@@ -6,9 +6,9 @@ sidebar_position: 12
 
 # Deployment
 
-## Current State
+## v3.0 Final runtime
 
-The application runtime is still designed for **local development first**. There is no committed production container or infrastructure setup for the API/dashboard stack yet, but the repo does already ship GitHub Actions for CI and for docs deployment.
+The application runtime targets a **local demonstration environment**. The repository includes GitHub Actions for verification and documentation deployment. Production infrastructure is outside the final release.
 
 **What is in the repo today:**
 - Two background processes from `run_dev.sh`
@@ -33,49 +33,9 @@ GitHub Actions deployment on push to `main` is already configured in `.github/wo
 
 ---
 
-## Production Recommendations
+## Verification
 
-| Component | Current | Production Path |
-|---|---|---|
-| API | `uvicorn` direct | Docker + nginx reverse proxy + HTTPS |
-| Database | SQLite | PostgreSQL (asyncpg + SQLAlchemy async) |
-| Frontend | Vite dev server | `npm run build` → CDN / nginx static |
-| AI service | In-process | Extract to microservice behind Redis Streams / NATS |
-| CORS | `*` | Set to specific allowed origins |
-| Secrets | `.env` file | Vault / AWS Secrets Manager |
-
-### Example Docker Setup (future)
-
-```dockerfile
-# apps/api/Dockerfile (not yet committed)
-FROM python:3.11-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-COPY . .
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-```yaml
-# docker-compose.yml (not yet committed)
-services:
-  api:
-    build: ./apps/api
-    ports: ["8000:8000"]
-    environment:
-      - DTX_ACTIVE_MODEL=lightgbm
-  dashboard:
-    build: ./apps/dashboard
-    ports: ["5173:5173"]
-```
-
----
-
-## CI/CD
-
-Two workflows are already committed:
-
-- `ci.yml` runs Python tests plus optional linting and dashboard lint on pushes/PRs.
-- `deploy.yml` builds and publishes `docweb/` to GitHub Pages on pushes to `main`.
-
-If you want stricter CI later, the next useful upgrade would be failing the job on lint errors and adding a docs build check to pull requests.
+The dashboard and documentation have production build commands. The Python
+suite covers API, inference, replay, and hardware bridge behavior. See the
+[setup guide](/docs/setup) for commands and [release limitations](/docs/known-issues)
+for deployment boundaries.

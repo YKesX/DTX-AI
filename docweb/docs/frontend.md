@@ -32,20 +32,20 @@ App.jsx (BrowserRouter + Layout)
 **Shared layout:**
 ```
 layout/Sidebar.jsx    Fixed left nav with NavLink routes
-layout/TopBar.jsx     Fixed top — WS status indicator + live clock
+layout/TopBar.jsx     Fixed top — release console title + live clock
 ```
 
 **UI primitives:**
 ```
 ui/Badge.jsx    Severity badge (info / warning / critical)
-ui/Card.jsx     Glass-morphism card container
+ui/Card.jsx     Paper-style card container
 ```
 
 ---
 
 ## State Management
 
-No global state library. State lives locally in page components via React hooks:
+Page state uses React hooks. `PreferencesProvider` shares validated browser-local settings:
 
 | Hook | Usage |
 |---|---|
@@ -72,7 +72,7 @@ API WebSocket ──► useWebSocket.js
 
 **`normalizeAlert.js`** handles multiple backend response shapes (live WebSocket push vs historical REST load) and normalizes them to a consistent flat view-model consumed by all components.
 
-**`useWebSocket.js`** auto-reconnects with a 3-second delay on disconnect. WS connection status is shown in the `TopBar`.
+**`useWebSocket.js`** auto-reconnects with a 3-second delay on disconnect. The header displays the clock; it has no connection badge. No mock events are injected.
 
 ---
 
@@ -90,6 +90,18 @@ Selecting an event row:
 AI validation page. Polls `GET /metrics/live` every 4 seconds and `GET /alerts/?limit=100` to populate the replay event table. Shows running accuracy, confusion matrix, and per-class distributions.
 
 ---
+
+### Events (`/events`)
+Loads the latest 50, 100, or 200 saved records, with configurable polling,
+full dates, search and severity/source/operator filters. Selection opens
+explanations and operator actions. Failed refreshes retain the last loaded
+records with an error message; failed actions retain the unsaved note.
+
+### Settings (`/settings`)
+Saves event history limits, automatic refresh, model defaults, ESP32 address,
+and hardware polling interval in local storage. Defaults apply when the demo
+page is next opened; saving does not alter a running demo. The API health
+button checks backend reachability.
 
 ## Environment Variables
 

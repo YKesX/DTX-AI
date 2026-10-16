@@ -1,38 +1,24 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { useWebSocket } from './hooks/useWebSocket';
 import Sidebar from './components/layout/Sidebar';
 import TopBar from './components/layout/TopBar';
 import Dashboard from './pages/Dashboard';
 import Validation from './pages/Validation';
+import Events from './pages/Events';
+import Settings from './pages/Settings';
+import { PreferencesProvider } from './context/Preferences';
 
 function Layout() {
-  const { status } = useWebSocket(null);
-
   return (
-    <div className="control-shell dark min-h-screen text-white">
+    <div className="control-shell min-h-screen text-ink">
       <Sidebar />
-      <div className="ml-56">
-        <TopBar title="Smart Warehouse Control Panel" wsStatus={status} />
-        <main className="min-h-screen px-6 pb-8 pt-16">
+      <div className="app-content">
+        <TopBar title="Smart Warehouse Control Panel" />
+        <main className="app-main min-h-screen">
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/validation" element={<Validation />} />
-            <Route
-              path="/events"
-              element={
-                <div className="py-20 text-center text-gray-400">
-                  Events page coming soon...
-                </div>
-              }
-            />
-            <Route
-              path="/settings"
-              element={
-                <div className="py-20 text-center text-gray-400">
-                  Settings page coming soon...
-                </div>
-              }
-            />
+            <Route path="/events" element={<Events />} />
+            <Route path="/settings" element={<Settings />} />
           </Routes>
         </main>
       </div>
@@ -42,8 +28,10 @@ function Layout() {
 
 export default function App() {
   return (
+    <PreferencesProvider>
     <BrowserRouter>
       <Layout />
     </BrowserRouter>
+    </PreferencesProvider>
   );
 }

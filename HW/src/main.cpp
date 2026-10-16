@@ -1,24 +1,8 @@
-// DTX-AI hardware demo node.
-//
-// ESP32-WROOM-32 reading a DS18B20 (1-Wire temperature) and a BMP280
-// (I2C pressure), exposed as a tiny JSON HTTP API on the local WiFi so
-// scripts/hw_demo_bridge.py can stream readings into the DTX-AI backend.
-//
-// Wiring (see docs/hardware_demo.md for the full diagram):
-//   DS18B20  +      -> 3V3
-//   DS18B20  -      -> GND
-//   DS18B20  OUT    -> GPIO 4   (with a 4.7 kΩ pull-up resistor to 3V3)
-//   BMP280   VCC    -> 3V3
-//   BMP280   GND    -> GND
-//   BMP280   SCL    -> GPIO 22  (I2C clock)
-//   BMP280   SDA    -> GPIO 21  (I2C data)
-//   BMP280   CSB    -> 3V3     (selects I2C mode)
-//   BMP280   SDO    -> GND     (I2C address 0x76)
-//
-// Endpoints:
-//   GET /         -> plain-text identity banner
-//   GET /health   -> {"status":"ok","uptime_ms":...,"wifi_rssi_dbm":...}
-//   GET /reading  -> latest sensor sample (see handleReading)
+// DTX-AI hardware demo node: externally powered DS18B20 + I2C BMP280.
+// DS18B20: + -> 3V3, - -> GND, yellow DATA -> GPIO 4.
+// Place a 4.7 kOhm resistor BETWEEN GPIO 4/DATA and 3V3 (not a jumper).
+// BMP280: VCC/CSB -> 3V3, GND/SDO -> GND, SDA -> 21, SCL -> 22.
+// The BMP280 does not support the DS18B20's 1-Wire protocol.
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -28,20 +12,27 @@
 #include <WebServer.h>
 #include <WiFi.h>
 #include <Wire.h>
-
 #include <Adafruit_BMP280.h>
+#include <math.h>
 
 #include "wifi_config.h"
 
-constexpr uint8_t ONE_WIRE_PIN = 4;     // DS18B20 data (needs 4.7k pull-up)
-constexpr uint8_t BMP_I2C_ADDR = 0x76;  // SDO -> GND
-constexpr uint32_t SAMPLE_PERIOD_MS = 500;
+constexpr uint8_t ONE_WIRE_PIN = 4;
+constexpr uint8_t I2C_SDA_PIN = 21;
+constexpr uint8_t I2C_SCL_PIN = 22;
+constexpr uint32_t SAMPLE_PERIOD_MS = 1000;
+constexpr uint32_t CONVERSION_MS = 750;  // DS18B20 maximum at 12-bit resolution
+constexpr uint32_t SENSOR_RETRY_MS = 5000;
+constexpr uint32_t WIFI_RETRY_MS = 15000;
+constexpr uint32_t STALE_AFTER_MS = 3000;
+constexpr char FIRMWARE_RELEASE[] = "v3.0 Final";
 constexpr char MDNS_HOSTNAME[] = "dtx-esp32";
 
 OneWire oneWire(ONE_WIRE_PIN);
 DallasTemperature ds18b20(&oneWire);
-Adafruit_BMP280 bmp280;  // I2C on default Wire (SDA 21 / SCL 22)
+Adafruit_BMP280 bmp280;
 WebServer server(80);
+DeviceAddress temperatureAddress;
 
 struct Sample {
   float ds18b20_temperature_c = NAN;
@@ -54,49 +45,127 @@ struct Sample {
 };
 
 Sample latest;
+bool ds18b20_present = false;
 bool bmp280_present = false;
-uint32_t lastSampleMs = 0;
+bool conversionPending = false;
+bool conversionRequested = false;
+bool wifiWasConnected = false;
+bool mdnsStarted = false;
+uint8_t bmpAddress = 0;
+uint32_t conversionStartedMs = 0;
+uint32_t lastSampleStartMs = 0;
+uint32_t lastSensorRetryMs = 0;
+uint32_t lastWifiAttemptMs = 0;
 
-void takeSample() {
+bool i2cResponds(uint8_t address) {
+  Wire.beginTransmission(address);
+  return Wire.endTransmission() == 0;
+}
+
+void discoverSensors() {
+  if (!ds18b20_present) {
+    ds18b20.setOneWire(&oneWire);  // reset cached parasite-power state before rescanning
+    ds18b20.begin();
+    ds18b20.setAutoSaveScratchPad(false);  // no EEPROM writes on each recovery
+    ds18b20.setWaitForConversion(false);
+    ds18b20_present = ds18b20.getAddress(temperatureAddress, 0) &&
+                      temperatureAddress[0] == 0x28 &&
+                      !ds18b20.isParasitePowerMode();
+    if (ds18b20_present) {
+      ds18b20_present = ds18b20.setResolution(temperatureAddress, 12);
+    }
+    Serial.printf("DS18B20: %s\n", ds18b20_present ? "ready" :
+                  "not ready; check +/GND/yellow DATA and 4.7k pull-up (external power required)");
+  }
+  if (!bmp280_present) {
+    for (uint8_t address : {uint8_t(0x76), uint8_t(0x77)}) {
+      if (i2cResponds(address) && bmp280.begin(address)) {
+        bmpAddress = address;
+        bmp280_present = true;
+        bmp280.setSampling(Adafruit_BMP280::MODE_NORMAL,
+                           Adafruit_BMP280::SAMPLING_X2,
+                           Adafruit_BMP280::SAMPLING_X16,
+                           Adafruit_BMP280::FILTER_X16,
+                           Adafruit_BMP280::STANDBY_MS_125);
+        Serial.printf("BMP280: ready at 0x%02X\n", address);
+        break;
+      }
+    }
+    if (!bmp280_present) {
+      Serial.println("BMP280: not found at 0x76/0x77; check SDA=21, SCL=22, CSB=3V3, SDO=GND");
+    }
+  }
+}
+
+void startSample() {
+  conversionRequested = ds18b20_present &&
+                        ds18b20.requestTemperaturesByAddress(temperatureAddress).result;
+  // Record the time AFTER issuing Convert T. No blocking conversion delay.
+  conversionStartedMs = millis();
+  lastSampleStartMs = conversionStartedMs;
+  conversionPending = true;
+}
+
+void finishSample() {
   Sample s;
   s.sequence = latest.sequence + 1;
-  s.sampled_at_ms = millis();
-
-  ds18b20.requestTemperatures();
-  const float tempC = ds18b20.getTempCByIndex(0);
-  if (tempC > DEVICE_DISCONNECTED_C + 1.0f) {
-    s.ds18b20_temperature_c = tempC;
-    s.ds18b20_ok = true;
+  if (conversionRequested && ds18b20.isConversionComplete()) {
+    // DallasTemperature checks scratchpad CRC and returns -127 on disconnect.
+    const float tempC = ds18b20.getTempC(temperatureAddress);
+    if (isfinite(tempC) && tempC >= -55.0f && tempC <= 125.0f) {
+      s.ds18b20_temperature_c = tempC;
+      s.ds18b20_ok = true;
+    }
   }
+  if (!s.ds18b20_ok) ds18b20_present = false;
 
-  if (bmp280_present) {
-    const float pressurePa = bmp280.readPressure();  // already in Pa
+  if (bmp280_present && i2cResponds(bmpAddress)) {
+    const float pressurePa = bmp280.readPressure();
     const float bmpTempC = bmp280.readTemperature();
-    if (!isnan(pressurePa) && pressurePa > 30000.0f && pressurePa < 120000.0f) {
+    if (i2cResponds(bmpAddress) && isfinite(pressurePa) &&
+        pressurePa >= 30000.0f && pressurePa <= 110000.0f &&
+        isfinite(bmpTempC) && bmpTempC >= -40.0f && bmpTempC <= 85.0f) {
       s.bmp280_pressure_pa = pressurePa;
       s.bmp280_temperature_c = bmpTempC;
       s.bmp280_ok = true;
     }
   }
-
+  if (!s.bmp280_ok) bmp280_present = false;
+  s.sampled_at_ms = millis();
   latest = s;
+  conversionPending = false;
+}
+
+bool sampleFresh() {
+  return latest.sequence != 0 && millis() - latest.sampled_at_ms <= STALE_AFTER_MS;
+}
+
+void addSampleStatus(JsonDocument& doc) {
+  const bool fresh = sampleFresh();
+  doc["ds18b20_ok"] = fresh && latest.ds18b20_ok;
+  doc["bmp280_ok"] = fresh && latest.bmp280_ok;
+  if (latest.sequence != 0) doc["sample_age_ms"] = millis() - latest.sampled_at_ms;
+  else doc["sample_age_ms"] = nullptr;
 }
 
 void handleRoot() {
   server.send(200, "text/plain",
-              "DTX-AI hardware demo node (ESP32-WROOM-32 + DS18B20 + BMP280)\n"
-              "GET /health  -> node status\n"
-              "GET /reading -> latest sensor sample as JSON\n");
+              "DTX-AI v3.0 Final hardware node (ESP32 + DS18B20 + BMP280)\n"
+              "GET /health -> node and sensor status\n"
+              "GET /reading -> latest sensor sample\n");
 }
 
 void handleHealth() {
   JsonDocument doc;
-  doc["status"] = "ok";
+  doc["status"] = latest.sequence == 0 ? "warming_up" :
+                  !sampleFresh() ? "stale" :
+                  latest.ds18b20_ok && latest.bmp280_ok ? "ok" : "degraded";
+  doc["release"] = FIRMWARE_RELEASE;
+  doc["firmware_version"] = "3.0.0";
   doc["uptime_ms"] = millis();
   doc["wifi_rssi_dbm"] = WiFi.RSSI();
   doc["ip"] = WiFi.localIP().toString();
-  doc["ds18b20_ok"] = latest.ds18b20_ok;
-  doc["bmp280_ok"] = latest.bmp280_ok;
+  addSampleStatus(doc);
   String body;
   serializeJson(doc, body);
   server.send(200, "application/json", body);
@@ -104,13 +173,11 @@ void handleHealth() {
 
 void handleReading() {
   JsonDocument doc;
-  // Field names deliberately match what scripts/hw_demo_bridge.py expects.
-  if (latest.ds18b20_ok) {
-    doc["temperature_c"] = latest.ds18b20_temperature_c;
-  } else {
-    doc["temperature_c"] = nullptr;
-  }
-  if (latest.bmp280_ok) {
+  const bool fresh = sampleFresh();
+  // Names and units match scripts/hw_demo_bridge.py. Invalid data stays null.
+  if (fresh && latest.ds18b20_ok) doc["temperature_c"] = latest.ds18b20_temperature_c;
+  else doc["temperature_c"] = nullptr;
+  if (fresh && latest.bmp280_ok) {
     doc["pressure_pa"] = latest.bmp280_pressure_pa;
     doc["bmp280_temperature_c"] = latest.bmp280_temperature_c;
   } else {
@@ -119,76 +186,74 @@ void handleReading() {
   }
   doc["sequence"] = latest.sequence;
   doc["sampled_at_ms"] = latest.sampled_at_ms;
-  doc["ds18b20_ok"] = latest.ds18b20_ok;
-  doc["bmp280_ok"] = latest.bmp280_ok;
+  addSampleStatus(doc);
   String body;
   serializeJson(doc, body);
   server.send(200, "application/json", body);
 }
 
-void connectWifi() {
-  WiFi.mode(WIFI_STA);
-#if DTX_USE_STATIC_IP
-  IPAddress ip(DTX_STATIC_IP), gw(DTX_GATEWAY), sn(DTX_SUBNET);
-  WiFi.config(ip, gw, sn);
-#endif
-  WiFi.begin(DTX_WIFI_SSID, DTX_WIFI_PASSWORD);
-  Serial.printf("Connecting to WiFi '%s'", DTX_WIFI_SSID);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+void serviceWifi() {
+  const bool connected = WiFi.status() == WL_CONNECTED;
+  if (connected && !wifiWasConnected) {
+    Serial.printf("WiFi connected. IP: %s\n", WiFi.localIP().toString().c_str());
+    if (mdnsStarted) MDNS.end();
+    mdnsStarted = MDNS.begin(MDNS_HOSTNAME);
+    if (mdnsStarted) {
+      MDNS.addService("http", "tcp", 80);
+      Serial.printf("mDNS: http://%s.local\n", MDNS_HOSTNAME);
+    }
   }
-  Serial.printf("\nConnected. IP: %s\n", WiFi.localIP().toString().c_str());
+  if (!connected && wifiWasConnected) {
+    Serial.println("WiFi lost; sampling continues while reconnecting.");
+    if (mdnsStarted) MDNS.end();
+    mdnsStarted = false;
+  }
+  wifiWasConnected = connected;
+  if (!connected && millis() - lastWifiAttemptMs >= WIFI_RETRY_MS) {
+    lastWifiAttemptMs = millis();
+    Serial.println("Retrying WiFi; check SSID/password and a 2.4 GHz network.");
+    WiFi.reconnect();
+  }
 }
 
 void setup() {
   Serial.begin(115200);
   delay(200);
-  Serial.println("\nDTX-AI hardware demo node booting...");
+  Serial.println("\nDTX-AI v3.0 Final hardware node booting...");
+  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+  Wire.setTimeOut(50);  // bound failed I2C transactions
+  discoverSensors();
+  lastSensorRetryMs = millis();
 
-  ds18b20.begin();
-  Serial.printf("DS18B20 devices found: %d\n", ds18b20.getDeviceCount());
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+#if DTX_USE_STATIC_IP
+  IPAddress ip(DTX_STATIC_IP), gw(DTX_GATEWAY), sn(DTX_SUBNET);
+  if (!WiFi.config(ip, gw, sn)) Serial.println("Static IP configuration failed.");
+#endif
+  WiFi.begin(DTX_WIFI_SSID, DTX_WIFI_PASSWORD);
+  lastWifiAttemptMs = millis();
+  Serial.println("Connecting to WiFi in background...");
 
-  Wire.begin();  // SDA 21, SCL 22
-  bmp280_present = bmp280.begin(BMP_I2C_ADDR);
-  if (!bmp280_present) {
-    // Some clone boards strap SDO high -> address 0x77.
-    bmp280_present = bmp280.begin(0x77);
-  }
-  Serial.printf("BMP280 present: %s\n", bmp280_present ? "yes" : "NO");
-  if (bmp280_present) {
-    bmp280.setSampling(Adafruit_BMP280::MODE_NORMAL,
-                       Adafruit_BMP280::SAMPLING_X2,   // temperature
-                       Adafruit_BMP280::SAMPLING_X16,  // pressure
-                       Adafruit_BMP280::FILTER_X16,
-                       Adafruit_BMP280::STANDBY_MS_125);
-  }
-
-  connectWifi();
-
-  if (MDNS.begin(MDNS_HOSTNAME)) {
-    MDNS.addService("http", "tcp", 80);
-    Serial.printf("mDNS: http://%s.local\n", MDNS_HOSTNAME);
-  }
-
-  server.on("/", handleRoot);
-  server.on("/health", handleHealth);
-  server.on("/reading", handleReading);
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/health", HTTP_GET, handleHealth);
+  server.on("/reading", HTTP_GET, handleReading);
   server.begin();
-  Serial.println("HTTP server listening on port 80.");
-
-  takeSample();
+  startSample();
 }
 
 void loop() {
   server.handleClient();
+  serviceWifi();
   const uint32_t now = millis();
-  if (now - lastSampleMs >= SAMPLE_PERIOD_MS) {
-    lastSampleMs = now;
-    takeSample();
+  if (conversionPending && now - conversionStartedMs >= CONVERSION_MS) finishSample();
+  if (!conversionPending) {
+    if ((!ds18b20_present || !bmp280_present) && now - lastSensorRetryMs >= SENSOR_RETRY_MS) {
+      lastSensorRetryMs = now;
+      discoverSensors();
+    }
+    if (now - lastSampleStartMs >= SAMPLE_PERIOD_MS) startSample();
   }
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi lost — reconnecting...");
-    connectWifi();
-  }
+  delay(1);  // yield to the ESP32 network/RTOS tasks
 }

@@ -11,7 +11,7 @@ activate_venv() {
   fi
 }
 
-echo "=== Starting DTX-AI dev environment ==="
+echo "=== Starting DTX-AI v3.0 Final ==="
 
 activate_venv
 

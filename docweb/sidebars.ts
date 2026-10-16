@@ -46,7 +46,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'doc',
       id: 'known-issues',
-      label: 'Known Issues',
+      label: 'Release Limitations',
     },
     {
       type: 'doc',
