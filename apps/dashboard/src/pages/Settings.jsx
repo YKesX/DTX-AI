@@ -70,7 +70,7 @@ export default function Settings() {
               <label className="block text-sm">Hardware polling (seconds)<input type="number" required min="1" max="60" step="0.5" className={inputClass} value={draft.hardwareInterval} onChange={(e) => update('hardwareInterval', e.target.value)} /></label>
               <label className="block text-sm">Default model
                 <select className={inputClass} value={draft.defaultModel} onChange={(e) => update('defaultModel', e.target.value)}>
-                  {Array.from(new Set([draft.defaultModel, ...models])).map((model) => <option key={model} value={model}>{model}</option>)}
+                  {Array.from(new Set([draft.defaultModel, ...models])).map((model) => <option key={model} value={model}>{model === 'lstm_ae' ? 'LSTM-AE + T5-small' : model}</option>)}
                 </select>
               </label>
             </div>

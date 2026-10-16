@@ -40,6 +40,11 @@ coverage.xml
 *.usdz
 *.log
 isaac_sim_cache/
+.vs/
+*.vsidx
+*.db-shm
+*.db-wal
+slnx.sqlite
 
 # SQLite
 *.db
@@ -52,3 +57,7 @@ isaac_sim_cache/
 
 # OS
 Thumbs.db
+
+# T5
+services/ai/ai/models/t5_explainer/
+services/ai/ai/models/t5_explainer*/

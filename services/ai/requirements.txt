@@ -23,6 +23,12 @@ pytorch-tabnet>=4.1.0
 # XAI
 shap>=0.45
 
+# T5-small: match the exported checkpoint; retain PlatformIO click compatibility.
+transformers==5.10.1
+huggingface-hub==1.16.1
+click>=8.0.4,<8.4
+sentencepiece>=0.1.99
+
 # Plotting (notebook + training script reports)
 matplotlib==3.10.9
 

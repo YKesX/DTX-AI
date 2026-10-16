@@ -10,6 +10,8 @@ from .schemas import (
     ExplanationResult,
     DashboardAlert,
     EventLog,
+    TwinUpdate,
+    PositionUpdate,
 )
 
 __all__ = [
@@ -18,4 +20,6 @@ __all__ = [
     "ExplanationResult",
     "DashboardAlert",
     "EventLog",
+    "TwinUpdate",
+    "PositionUpdate",
 ]

@@ -27,5 +27,5 @@ channels are derived or synthesized, with their provenance recorded in each
 event's metadata. Hardware predictions are demonstrations, without measured
 ground-truth accuracy. See [hardware_demo.md](hardware_demo.md).
 
-A live Isaac Sim adapter is outside the final release. Telemetry generation
+The simulator adapter is retained, with logging hooks awaiting host scene integration. Telemetry generation
 in the source dataset does not imply a running digital-twin integration.

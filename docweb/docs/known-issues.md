@@ -33,7 +33,8 @@ Firmware builds do not substitute for testing wiring and sensor behavior on a bo
 
 ## Runtime boundaries
 
-- Live Isaac Sim integration is outside this release; placeholder adapters were removed.
+- The simulator adapter and position playback are retained. Scene hooks currently log updates and require host USD integration.
+- T5 explanations require the separately distributed fine-tuned model files. Without them, the UI labels the LSTM-AE fallback.
 - Event history requests return at most the latest 200 records.
 - Browser preferences are local to that browser and are not account settings.
 - SQLite and in-process inference target local workloads.

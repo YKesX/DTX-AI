@@ -7,7 +7,10 @@ from fastapi import APIRouter, HTTPException, status
 
 from shared.schemas import (
     EventIn,
+    AnomalyResult,
     DashboardAlert,
+    TwinUpdate,
+    AssetStatus,
 )
 from api.database import insert_event
 from api.live_metrics import live_metrics
@@ -70,11 +73,28 @@ def _normalize_gt_label(raw: str) -> str:
     return _GT_LABEL_MAP.get(key, key)
 
 
+def _build_twin_update(event: EventIn, anomaly: AnomalyResult) -> TwinUpdate:
+    status_map = {
+        "critical": AssetStatus.FAULT,
+        "warning": AssetStatus.DEGRADED,
+        "info": AssetStatus.NORMAL,
+    }
+    return TwinUpdate(
+        event_id=event.event_id,
+        asset_id=event.asset_id,
+        zone_id=event.zone_id,
+        new_status=status_map.get(anomaly.severity.value, AssetStatus.NORMAL),
+        severity=anomaly.severity,
+        label=f"{anomaly.anomaly_type.value} / score={anomaly.anomaly_score:.2f}",
+    )
+
+
 @router.post("/", status_code=status.HTTP_202_ACCEPTED, response_model=DashboardAlert)
 async def ingest_event(event: EventIn):
     """
     Accept a warehouse sensor event, run anomaly detection and XAI,
-    persist the result and broadcast to WebSocket clients.
+    persist the result, broadcast to WebSocket clients, and trigger
+    the Isaac Sim adapter.
     """
     # Lazy import to keep services/ai decoupled
     try:
@@ -103,6 +123,7 @@ async def ingest_event(event: EventIn):
     metadata["predicted_is_anomaly"] = bool(anomaly.is_anomaly)
     metadata["predicted_score"] = float(anomaly.anomaly_score)
     metadata["recommendation"] = explanation.recommendation
+    metadata["explanation_source"] = explanation.source
 
     if source == "dataset_replay":
         gt_raw = str(
@@ -143,4 +164,21 @@ async def ingest_event(event: EventIn):
     # Broadcast to dashboard
     await manager.broadcast(alert.model_dump(mode="json"))
 
+    # Trigger digital-twin update (fire-and-forget; sim may not be running)
+    twin_update = _build_twin_update(event, anomaly)
+    _try_notify_sim(twin_update)
+
     return alert
+
+
+def _try_notify_sim(update: TwinUpdate) -> None:
+    """
+    Attempt to notify the Isaac Sim adapter.
+    Silently skips if the adapter is not installed or reachable.
+    """
+    try:
+        from sim.adapter import notify  # type: ignore[import]
+        notify(update)
+    except Exception:
+        # Sim is optional — do not fail the API request
+        pass

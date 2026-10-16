@@ -1,6 +1,6 @@
 # Usage Guide — v3.0 Final
 
-This guide covers the completed local application. Live Isaac Sim integration is outside the final release.
+This guide covers the completed local application. The optional simulator adapter is retained; see [adapter setup](../apps/sim/README.md).
 
 ## 1) Setup
 
@@ -185,6 +185,6 @@ PYTHONPATH="packages:services:services/ai:apps/api" .venv/bin/pytest -q tests/un
 
 ## 11) Final release boundaries
 
-Live Isaac Sim integration is outside v3.0 Final. Dataset limitations are
+Simulator adapter hooks require validation inside an Isaac Sim host. Dataset limitations are
 recorded in [dataset_limitations.md](dataset_limitations.md). Hardware
 wiring and operation are documented in [hardware_demo.md](hardware_demo.md).

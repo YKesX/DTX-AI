@@ -118,7 +118,7 @@ shap_values = explainer.shap_values(X)
 The top-3 features by absolute SHAP value are surfaced in the dashboard `ExplanationPanel` as a horizontal bar chart, making the model's reasoning visible to operators.
 
 ### Deep / non-tree model explainability
-TabNet, CNN, Bi-LSTM and LSTM-AE do **not** support SHAP TreeExplainer (`supports_tree_xai: false` in registry). When one of them is active, `explain()` returns a generic per-class summary string — no per-feature attribution. Adding `DeepExplainer` support is tracked in [Known Issues](/docs/known-issues).
+TabNet, CNN, Bi-LSTM and LSTM-AE do **not** support SHAP TreeExplainer (`supports_tree_xai: false` in registry). LSTM-AE uses the fine-tuned T5 explainer when its weights are installed; otherwise it returns a labeled template fallback. The dashboard Explanation panel shows the actual source for live and saved events. Other non-tree runtimes retain their fallback summaries without SHAP attribution. Adding `DeepExplainer` support is tracked in [Known Issues](/docs/known-issues).
 
 ---
 

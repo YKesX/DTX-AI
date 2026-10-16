@@ -73,7 +73,7 @@ function parseRawPayload(rawPayload) {
  * Returns null if the input is falsy.
  */
 export function normalizeAlert(raw) {
-  if (!raw) return null;
+  if (!raw || raw.type === 'position_update') return null;
 
   // ── Shape A: DashboardAlert (nested) ──────────────────────────────────────
   if (raw.alert_id !== undefined || (raw.event && raw.anomaly && raw.explanation)) {
@@ -121,6 +121,7 @@ export function normalizeAlert(raw) {
       explanation: [explanation.summary, explanation.recommendation]
         .filter(Boolean)
         .join(' '),
+      explanation_source: explanation.source ?? metadata.explanation_source ?? 'unknown',
       summary: explanation.summary ?? '',
       recommendation: explanation.recommendation ?? '',
       _raw: raw,
@@ -175,6 +176,7 @@ export function normalizeAlert(raw) {
       [raw.summary ?? raw.explanation ?? '', payloadMetadata.recommendation ?? raw.recommendation ?? '']
         .filter(Boolean)
         .join(' '),
+    explanation_source: payloadMetadata.explanation_source ?? 'unknown',
     summary: raw.summary ?? raw.explanation ?? '',
     recommendation: payloadMetadata.recommendation ?? raw.recommendation ?? '',
     _raw: raw,

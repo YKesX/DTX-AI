@@ -155,7 +155,7 @@ export default function DemoControlPanel() {
           >
             {(models.length ? models : [model]).map((key) => (
               <option key={key} value={key}>
-                {key}
+                {key === 'lstm_ae' ? 'LSTM-AE + T5-small' : key}
               </option>
             ))}
           </select>

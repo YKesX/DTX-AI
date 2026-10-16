@@ -263,3 +263,61 @@ async def test_alert_actions_persist_and_derive_operator_state():
         alert_row = alerts_resp.json()["alerts"][0]
         assert alert_row["operator_status"] == "resolved"
         assert alert_row["assigned_to"] == "Hakki"
+
+
+@pytest.mark.asyncio
+async def test_demo_and_positions_routes_survive_merge(monkeypatch):
+    from unittest.mock import AsyncMock, Mock
+    from api.routes import positions
+    import sim.adapter
+
+    broadcast = AsyncMock()
+    move = Mock()
+    monkeypatch.setattr(positions.manager, "broadcast", broadcast)
+    monkeypatch.setattr(sim.adapter, "move_entity", move)
+    monkeypatch.setattr(positions, "_latest", {})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        models = await client.get("/demo/models")
+        assert models.status_code == 200
+        assert "lstm_ae" in models.json()["models"]
+        response = await client.post("/positions/", json={"entity_id": "test-forklift", "x": 1, "y": 2})
+        assert response.status_code == 202
+        saved = (await client.get("/positions/latest")).json()
+        assert saved[0]["x"] == 1
+        assert saved[0]["type"] == "position_update"
+        assert (await client.post("/positions/", json={"entity_id": "invalid"})).status_code == 422
+    broadcast.assert_awaited_once_with(saved[0])
+    move.assert_called_once()
+    assert move.call_args.args[0].entity_id == "test-forklift"
+
+
+@pytest.mark.asyncio
+async def test_t5_explanation_persisted_and_twin_notified(monkeypatch):
+    from unittest.mock import Mock
+    from shared.schemas import AnomalyResult, ExplanationResult
+    import ai.pipeline
+    import sim.adapter
+
+    text = "Temperature rose under load. Inspect cooling."
+    async def pipeline(event):
+        return (
+            AnomalyResult(event_id=event.event_id, anomaly_score=0.9, is_anomaly=True,
+                          anomaly_type="overheat", severity="critical"),
+            ExplanationResult(event_id=event.event_id, summary=text, source="t5"),
+        )
+    notify = Mock()
+    monkeypatch.setattr(ai.pipeline, "run_pipeline", pipeline)
+    monkeypatch.setattr(sim.adapter, "notify", notify)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/events/", json={"asset_id": "test-forklift", "zone_id": "A"})
+        assert response.status_code == 202
+        assert response.json()["explanation"]["source"] == "t5"
+        saved = (await client.get("/alerts/")).json()["alerts"][0]
+        assert saved["summary"] == text
+        import json
+        payload = saved["raw_payload"]
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        assert payload["metadata"]["explanation_source"] == "t5"
+    notify.assert_called_once()
+    assert notify.call_args.args[0].new_status.value == "fault"

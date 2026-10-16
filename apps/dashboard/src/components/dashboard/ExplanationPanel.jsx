@@ -194,9 +194,18 @@ export default function ExplanationPanel({
       ) : null}
 
       <div className="space-y-2">
-        <p className="text-xs uppercase tracking-wider text-dim">Explanation</p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs uppercase tracking-wider text-dim">Explanation</p>
+          <span className="rounded-full border border-[var(--border)] px-3 py-1 text-xs text-muted">
+            {{ t5: 'T5 explainer', lstm_template: 'LSTM-AE fallback', shap: 'SHAP',
+              feature_importance: 'Feature importance', rules: 'Rule-based' }[event.explanation_source] || 'Source not recorded'}
+          </span>
+        </div>
+        {event.explanation_source === 'lstm_template' && (
+          <p className="text-xs text-muted">T5 could not generate an explanation for this event. Showing the LSTM-AE summary.</p>
+        )}
         <div className="control-panel-muted rounded-2xl p-4">
-          <p className="text-sm leading-relaxed text-muted">
+          <p className="whitespace-pre-line text-sm leading-relaxed text-muted">
             {event.summary || event.explanation || '—'}
           </p>
         </div>

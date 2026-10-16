@@ -44,7 +44,7 @@ The hardware node serves `/health` and `/reading` on port 80.
 `tests/unit`, `tests/smoke`, and `tests/integration` cover helpers, schemas,
 model loading, replay, sensor fault handling, and API workflows.
 
-The final release targets a local demonstration environment. Live Isaac Sim
-integration, production authentication, and distributed infrastructure are
-outside its scope. Dataset limitations and the synthesized hardware channels
+The final release targets a local demonstration environment. The optional simulator adapter dispatches status and position updates; its scene
+hooks require host USD integration. Production authentication and distributed
+infrastructure are outside its scope. Dataset limitations and the synthesized hardware channels
 are documented in [dataset_limitations.md](dataset_limitations.md).

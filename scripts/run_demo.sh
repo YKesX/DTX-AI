@@ -92,7 +92,7 @@ echo "Model:     ${DTX_ACTIVE_MODEL:-registry active model}"
 
 (
   cd "$REPO_ROOT"
-  PYTHONPATH="$REPO_ROOT/packages:$REPO_ROOT/services:$REPO_ROOT/services/ai${PYTHONPATH:+:$PYTHONPATH}" \
+  PYTHONPATH="$REPO_ROOT/packages:$REPO_ROOT/apps/sim:$REPO_ROOT/services:$REPO_ROOT/services/ai${PYTHONPATH:+:$PYTHONPATH}" \
     bash scripts/run_dev.sh
 ) &
 RUN_DEV_PID=$!

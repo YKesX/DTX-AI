@@ -48,6 +48,35 @@ class Severity(str, Enum):
     CRITICAL = "critical"
 
 
+class AssetStatus(str, Enum):
+    NORMAL = "normal"
+    DEGRADED = "degraded"
+    FAULT = "fault"
+    OFFLINE = "offline"
+
+
+class TwinUpdate(BaseModel):
+    event_id: UUID
+    asset_id: str
+    zone_id: str
+    new_status: AssetStatus
+    severity: Severity
+    label: str = ""
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class PositionUpdate(BaseModel):
+    """Warehouse entity position for the simulator adapter and playback."""
+    entity_id: str = Field(..., min_length=1)
+    entity_type: str = "forklift"
+    x: float = Field(..., allow_inf_nan=False)
+    y: float = Field(..., allow_inf_nan=False)
+    z: float = Field(default=0.0, allow_inf_nan=False)
+    heading: float = Field(default=0.0, allow_inf_nan=False)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    zone_id: str = ""
+
+
 class AlertActionType(str, Enum):
     """Operator-side incident actions."""
 
@@ -151,6 +180,7 @@ class ExplanationResult(BaseModel):
 
     event_id: UUID
     summary: str
+    source: str = Field(default="unknown", description="Explainer that produced this summary")
     contributing_features: dict[str, float] = Field(default_factory=dict)
     recommendation: str = Field(default="")
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

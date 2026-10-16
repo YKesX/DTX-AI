@@ -142,7 +142,7 @@ Dashboard convenience:
 
 ## Release limitations
 
-- Live Isaac Sim integration is outside the final release.
+- Simulator adapter, position playback, and Isaac Sim scripts are retained; scene hooks require host integration. See [adapter setup](apps/sim/README.md).
 - `scripts/train_models.py` is the canonical retraining entry point; the training notebook is retained as an experiment record.
 - LSTM-AE strict replay requires a configured numeric threshold (`default_threshold`)
 - all model metrics now come from the same canonical split (`shared/leaderboard.json`), but the dataset is still highly separable — near-perfect scores reflect the data, not model strength (see [docs/dataset_limitations.md](docs/dataset_limitations.md))
